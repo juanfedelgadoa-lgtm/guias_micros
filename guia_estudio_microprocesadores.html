@@ -1,0 +1,3085 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Guía de estudio - Microprocesadores</title><style>body{font-family:Segoe UI,Arial,sans-serif;max-width:1000px;margin:auto;padding:24px;line-height:1.55;color:#222}
+pre{background:#f4f4f4;padding:12px;overflow-x:auto;font-size:12.5px;line-height:1.25;border-radius:6px}
+code{font-family:Consolas,'DejaVu Sans Mono',monospace}
+table{border-collapse:collapse;margin:10px 0;font-size:14px}th,td{border:1px solid #bbb;padding:4px 8px}th{background:#e8eef7}
+h1{border-bottom:3px solid #345;padding-bottom:4px}h2{border-bottom:1px solid #aaa;margin-top:40px}
+blockquote{border-left:4px solid #6a8;margin:0;padding:4px 12px;background:#f3faf5}
+details{background:#fafafa;border:1px solid #ddd;padding:6px 10px;margin:8px 0}</style></head><body><h1>Guía de estudio: Análisis y Diseño de Microprocesadores</h1>
+<h3>Diseño basado en Unidad de Control + Camino de Datos (UC + CD / FSMD)</h3>
+<blockquote>
+<p>Material base: diapositivas del Prof. Andrés Gaona (&quot;Diseño basado en UC y CD&quot;), apuntes de ASM, Talleres 5 y 6, problemas del capítulo 8 de <em>Principios de Diseño Digital</em> (Gajski) y la Realimentación N°2 del semestre anterior.
+No se incluye nada de VHDL: solo diseño (algoritmo, ASM, camino de datos, unidad de control, optimización).</p>
+</blockquote>
+<hr>
+<h2>Índice</h2>
+<p><strong>Parte I: Teoría</strong></p>
+<ol>
+<li>El modelo UC + CD</li>
+<li>Reglas de temporización (la idea más importante del curso)</li>
+<li>Caja negra y caja gris</li>
+<li>Diagramas ASM</li>
+<li>Moore vs Mealy en ASM</li>
+<li>Metodología completa de diseño (los pasos que piden en el parcial)</li>
+<li>Componentes del camino de datos</li>
+<li>La palabra de control</li>
+<li>La unidad de control: implementación canónica con ROMs</li>
+<li>Optimización del camino de datos: tiempos de vida, <em>left-edge</em> y grafos</li>
+<li>Planificación (scheduling): ASAP, ALAP, movilidad, TC y RC</li>
+<li>Encadenamiento y multiciclo</li>
+<li>Segmentación (pipelining)</li>
+<li>Periodo de reloj y camino crítico</li>
+<li>Técnicas algorítmicas de los talleres (sumas/restas sucesivas, signo, decimales, overflow)</li>
+</ol>
+<p><strong>Parte II: Ejercicios resueltos</strong></p>
+<ul>
+<li>E1. Ejemplo 1 del profesor: Σ xᵢ con CD preestablecido</li>
+<li>E2. Ejemplo 2 del profesor: contador de unos con banco de registros</li>
+<li>E3. Contador de unos de los apuntes: versión Moore vs versión Mealy</li>
+<li>E4. Dimensionamiento de la UC en los Talleres 5 y 6</li>
+<li><strong>E5. EL PARCIAL (Realimentación N°2) resuelto completo + análisis de tus errores</strong></li>
+<li>E6. Problema 8.10: asignación de registros con <em>left-edge</em></li>
+<li>E7. Problemas 8.20–8.22: planificación ASAP/ALAP/TC/RC (ecuación diferencial)</li>
+<li>E8. Algoritmo SRA: planificación y camino de datos segmentado (8.15)</li>
+<li>E9. Problemas 8.4, 8.5 y 8.8: diagramas ASM</li>
+<li>E10. Problema 8.11: partición de grafos de compatibilidad</li>
+<li>E11. Problema 8.16: control segmentado</li>
+</ul>
+<p><strong>Parte III: Práctica y repaso</strong></p>
+<ul>
+<li>Ejercicios propuestos con respuesta</li>
+<li>Errores frecuentes</li>
+<li>Hoja de fórmulas</li>
+</ul>
+<hr>
+<h1>PARTE I: TEORÍA</h1>
+<h2>1. El modelo UC + CD</h2>
+<p>Un microprocesador <strong>dedicado</strong> (de propósito específico) se divide en dos bloques que trabajan juntos:</p>
+<pre><code>              Entradas de control (Inicio)          Puertos de entrada (datos)
+                        │                                    │
+                        ▼                                    ▼
+              ┌───────────────────┐  Señales de control ┌───────────────────┐
+              │  UNIDAD DE        │ ───────────────────►│  CAMINO DE        │
+              │  CONTROL (UC)     │   (palabra de       │  DATOS (CD)       │
+              │  = una FSM        │    control, PC)     │                   │
+              │                   │◄─────────────────── │                   │
+              └───────────────────┘  Señales de estado  └───────────────────┘
+                        │             (α, β, OV, ...)                │
+                        ▼                                            ▼
+              Salidas de control (Final)                 Puertos de salida (resultado)
+</code></pre>
+<p><strong>Unidad de Control (UC).</strong> Es una máquina de estados finitos (FSM). No calcula nada. Decide <em>qué</em> se hace en cada ciclo de reloj:</p>
+<ul>
+<li>qué operación hace cada unidad funcional (sumar, restar, AND…),</li>
+<li>de dónde vienen los operandos (selectores de multiplexores, direcciones de lectura del banco),</li>
+<li>dónde se guarda el resultado (habilitación de escritura de registros, dirección de escritura).</li>
+</ul>
+<p><strong>Camino de Datos (CD).</strong> Es el circuito que sí calcula: registros, ALU, sumadores, multiplicadores, desplazadores, comparadores, multiplexores, buffers <em>three-state</em>. Los datos pueden llegar desde puertos externos o estar guardados en registros/memorias internas (por ejemplo, las ROM de los talleres).</p>
+<p><strong>Las dos señales que los conectan:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Señal</th>
+<th>Dirección</th>
+<th>Qué es</th>
+<th>Ejemplos</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Señales de control (palabra de control, PC)</td>
+<td>UC → CD</td>
+<td>Bits que configuran el CD en el estado actual</td>
+<td><code>s</code> del MUX, <code>wr</code>, <code>dirA</code>, <code>M s1 s0</code> de la ALU, <code>h</code> del three-state</td>
+</tr>
+<tr>
+<td>Señales de estado</td>
+<td>CD → UC</td>
+<td>Bits de 1 bit que resumen una condición de los datos</td>
+<td>α = (i = 10), β = (Dato = 0), OV, signo</td>
+</tr>
+</tbody></table>
+<p>Las señales de estado existen <strong>solo</strong> porque el ASM tiene cajas de decisión que preguntan por datos. Si el algoritmo no tiene decisiones sobre datos (como en el parcial), el CD no genera señales de estado y la UC solo depende de <code>Inicio</code>.</p>
+<p>En el libro de Gajski a este conjunto se le llama <strong>FSMD</strong> (<em>Finite State Machine with Datapath</em>).</p>
+<hr>
+<h2>2. Reglas de temporización (la idea más importante del curso)</h2>
+<p>Estas cuatro frases de las diapositivas explican casi todos los errores típicos:</p>
+<ol>
+<li>Las constantes y variables se guardan en memorias, registros o flip-flops.</li>
+<li>Los datos se guardan <strong>de forma síncrona</strong> (en el flanco de reloj).</li>
+<li>El CD transforma los datos <strong>durante</strong> un estado (entre dos flancos).</li>
+<li>El resultado se guarda <strong>al final del estado actual</strong> y está disponible <strong>en el estado siguiente</strong>.</li>
+</ol>
+<p>Consecuencias prácticas:</p>
+<ul>
+<li><strong>Dentro de un mismo estado, todas las asignaciones son simultáneas.</strong> Si en un estado escribes <code>t1 = x·x</code> y <code>t3 = t1·x</code>, el <code>t1</code> que usa la segunda operación es el <strong>viejo</strong>, no el que acabas de calcular. Por eso una operación que depende de otra debe ir en un estado <strong>posterior</strong> (o usar encadenamiento, sección 12).</li>
+<li><strong>Un registro se puede leer y escribir en el mismo estado.</strong> Se lee el valor viejo y al final del estado queda el nuevo. Por eso <code>suma = suma + x</code> o <code>t9 = t9 &gt;&gt; 1</code> caben en un estado.</li>
+<li><strong>Una variable que se calcula en el estado Sk &quot;nace&quot; en Sk+1.</strong> Esto es la base de los tiempos de vida (sección 10).</li>
+<li><strong>Una decisión que pregunta por un registro ve el valor que tenía al entrar al estado</strong>, no el que se está escribiendo en ese estado. Este detalle aparece en el ejemplo del contador de unos (E2).</li>
+</ul>
+<pre><code>  reloj:   ─┐  ┌──┐  ┌──┐  ┌──┐  ┌──
+            └──┘  └──┘  └──┘  └──┘
+  estado:  |  S1  |  S2  |  S3  |
+           |t1←x·x|t3←t1·x|
+                  ▲
+                  └── t1 ya está guardado: se puede usar en S2
+</code></pre>
+<hr>
+<h2>3. Caja negra y caja gris</h2>
+<p><strong>Caja negra.</strong> Es la vista externa del sistema completo: solo entradas y salidas, con su número de bits. No muestra nada interno.</p>
+<pre><code>            Inicio ──►┌──────────────┐──► Final
+     in1..in4 ──/n──►│  Ecuación    │──/n──► Out
+               CLK ──►│              │
+               RST ──►└──────────────┘
+</code></pre>
+<p><strong>Caja gris.</strong> Abre la caja negra en dos bloques (UC y CD) y muestra <strong>las señales entre ellos con su número de bits</strong>: el ancho de la palabra de control y cuántas señales de estado hay.</p>
+<pre><code>   Inicio                         in1..in4
+     │                               │
+     ▼        PC (k bits)            ▼
+  ┌──────┐ ───────/k────────►  ┌──────┐
+  │  UC  │                     │  CD  │──/n──► Out
+  │      │ ◄──────/m────────── │      │
+  └──────┘   señales estado    └──────┘
+     │        (m bits)          ▲    ▲
+     ▼                         CLK  RST
+   Final       (CLK y RST llegan a ambos)
+</code></pre>
+<p>Para dibujar la caja gris completa necesitas conocer <strong>k</strong> (bits de la palabra de control) y <strong>m</strong> (señales de estado). Por eso la caja gris se termina después de diseñar el CD.</p>
+<p>Reglas para repartir las señales:</p>
+<ul>
+<li><code>Inicio</code> entra a la <strong>UC</strong> (es una entrada de control, se usa en una caja de decisión).</li>
+<li><code>Final</code> sale de la <strong>UC</strong> (es una salida que depende solo del estado).</li>
+<li>Los datos de entrada y el resultado entran y salen del <strong>CD</strong>.</li>
+<li>CLK y RST llegan a los dos bloques.</li>
+</ul>
+<hr>
+<h2>4. Diagramas ASM (Algorithmic State Machine)</h2>
+<p>Un ASM es un diagrama de flujo con significado temporal: describe a la vez la UC y lo que hace el CD en cada estado.</p>
+<h3>4.1 Los tres tipos de caja</h3>
+<table>
+<thead>
+<tr>
+<th>Caja</th>
+<th>Forma</th>
+<th>Qué contiene</th>
+<th>Qué implica para la UC</th>
+<th>Qué implica para el CD</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>De estado</strong></td>
+<td>Rectángulo</td>
+<td>Asignaciones incondicionales: <code>d = b + c</code>, <code>h = h &gt;&gt; 2</code>, <code>Final = 1</code></td>
+<td>Cada caja de estado es <strong>un estado</strong> de la FSM</td>
+<td>Define las unidades funcionales y los registros necesarios</td>
+</tr>
+<tr>
+<td><strong>De decisión</strong></td>
+<td>Rombo, salidas 1/0</td>
+<td>Una pregunta: <code>Inicio</code>, <code>d = 0</code>, <code>b ≥ c</code></td>
+<td>Las preguntas son <strong>entradas</strong> de la UC (condiciones de transición)</td>
+<td>Hay que crear un bloque combinacional (comparador) que genere la señal de estado</td>
+</tr>
+<tr>
+<td><strong>De asignación condicional</strong></td>
+<td>Óvalo / rectángulo redondeado</td>
+<td>Asignaciones que solo ocurren si se tomó ese camino: <code>a = INPORT</code></td>
+<td><strong>No</strong> genera estado nuevo. Su presencia hace la máquina <strong>Mealy</strong></td>
+<td>Igual que la caja de estado: pide operadores y registros</td>
+</tr>
+</tbody></table>
+<h3>4.2 El bloque ASM</h3>
+<p>Un <strong>bloque ASM</strong> es una caja de estado más todas las cajas de decisión y de asignación condicional que cuelgan de ella hasta llegar a la siguiente caja de estado. <strong>Todo lo que hay dentro de un bloque ocurre en un solo ciclo de reloj.</strong></p>
+<pre><code>   ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ┐  ← bloque ASM del estado S2
+     ┌──────────────┐
+   │ │ S2:  cuenta  │              │   (caja de estado)
+     └──────┬───────┘
+   │        ▼                      │
+         ◇ α ◇ ── 0 ──┐                (caja de decisión)
+   │        │1        │            │
+            ▼         │
+   │  (cuenta=cuenta+1)│           │   (asignación condicional)
+            │         │
+   └ ─ ─ ─ ─┼─ ─ ─ ─ ─┼─ ─ ─ ─ ─ ─ ┘
+            ▼         ▼
+          S3 ...     S4 ...
+</code></pre>
+<h3>4.3 Reglas del ASM (de tus apuntes)</h3>
+<ol>
+<li><strong>Para un estado presente y un conjunto de valores de las decisiones solo debe haber un estado siguiente.</strong> No pueden salir dos caminos válidos a la vez para las mismas condiciones.</li>
+<li><strong>Todo camino a través de cajas de decisión debe llegar a una caja de estado.</strong> No se puede volver de una decisión a otra decisión sin pasar por un estado (eso sería un lazo combinacional infinito). Si necesitas &quot;esperar&quot;, el lazo debe regresar a la caja de estado, no al rombo.</li>
+</ol>
+<pre><code>  MAL (regla 2):               BIEN:
+     ┌───────┐                    ┌──────────┐◄──┐
+     │  S0   │                    │ S0       │   │
+     └───┬───┘                    └────┬─────┘   │
+    ┌───►◇ Inicio ◇                   ◇ Inicio ◇─0┘
+    └─0──┘   │1                        │1
+             ▼                         ▼
+</code></pre>
+<h3>4.4 Equivalencia ASM ↔ diagrama de estados</h3>
+<ul>
+<li>Cada caja de estado = un círculo del diagrama de estados.</li>
+<li>Cada camino de decisiones entre dos estados = una flecha etiquetada con la condición (<code>Inicio=1</code>, <code>α=0</code>).</li>
+<li>En Moore, dentro del círculo se escribe la salida: <code>PC1 &amp; Final=0</code>.</li>
+<li>En Mealy, la salida va en la flecha: <code>β=1 / PC4</code>.</li>
+</ul>
+<hr>
+<h2>5. Moore vs Mealy en ASM</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Moore (&quot;basado en estados&quot;)</th>
+<th>Mealy (&quot;basado en entradas&quot;)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Salidas (palabra de control, Final) dependen de</td>
+<td>Solo el estado actual</td>
+<td>Estado actual <strong>y</strong> entradas/señales de estado</td>
+</tr>
+<tr>
+<td>En el ASM</td>
+<td>Solo cajas de estado y decisión</td>
+<td>Hay cajas de asignación condicional</td>
+</tr>
+<tr>
+<td>Número de estados</td>
+<td>Mayor</td>
+<td>Menor (varias acciones se &quot;comprimen&quot; en un estado)</td>
+</tr>
+<tr>
+<td>ROM de salida</td>
+<td>Direccionada solo por el estado: 2^(bits estado)</td>
+<td>Direccionada por estado + condiciones que afectan la salida</td>
+</tr>
+<tr>
+<td>Periodo de reloj</td>
+<td>Más corto (la salida no espera a las condiciones)</td>
+<td>Puede ser más largo: el camino crítico pasa por comparador → UC → CD</td>
+</tr>
+<tr>
+<td>Ejemplo</td>
+<td>Contador de unos: 6 estados</td>
+<td>Contador de unos: 3 estados</td>
+</tr>
+</tbody></table>
+<p>El libro llama a Moore <strong>FSMD basado en estados</strong> y a Mealy <strong>FSMD basado en entradas</strong>.</p>
+<hr>
+<h2>6. Metodología completa de diseño (lo que piden en el parcial)</h2>
+<p>Ésta es la secuencia que siguen el profesor, los talleres y el parcial. Apréndela en orden:</p>
+<ol>
+<li><strong>Caja negra</strong>: entradas, salidas y número de bits.</li>
+<li><strong>Pseudoalgoritmo</strong>: el cálculo paso a paso, con <code>Final = 0</code>, espera de <code>Inicio</code>, cálculo, salida y <code>Final = 1</code>.</li>
+<li><strong>Diagrama ASM</strong>: repartir las operaciones en estados <strong>respetando</strong>:<ul>
+<li>las dependencias de datos (una operación va después de las que producen sus operandos),</li>
+<li>los <strong>recursos disponibles</strong> (si solo hay 1 multiplicador, máximo 1 multiplicación por estado),</li>
+<li>las reglas del ASM.</li>
+</ul>
+</li>
+<li><strong>Tabla de tiempos de vida</strong> de las variables y <strong>asignación de registros</strong> (mínimo número de registros: <em>left-edge</em>).</li>
+<li><strong>Camino de datos</strong>: registros + unidades funcionales + multiplexores en cada entrada que tenga más de una fuente + comparadores para las señales de estado + buffer de salida.</li>
+<li><strong>Palabra de control</strong>: listar todos los bits de control del CD y su valor en cada estado.</li>
+<li><strong>Caja gris</strong> (UC + CD con los anchos de bus).</li>
+<li><strong>Unidad de control</strong>: número de estados → bits de registro → tamaño de ROM de entrada y ROM de salida → <strong>contenido</strong> de ambas ROM (tabla de transiciones y tabla de palabras de control).</li>
+</ol>
+<p>En el parcial te bajaron puntos justamente en los pasos 5 y 8: el CD quedó incompleto y no estaban descritos los contenidos de las ROM. En E5 está todo resuelto.</p>
+<hr>
+<h2>7. Componentes del camino de datos</h2>
+<h3>7.1 Registro</h3>
+<p>Guarda n bits en el flanco de reloj. Señales típicas:</p>
+<ul>
+<li><strong>LD / we (write enable)</strong>: si vale 1, en el flanco carga la entrada; si vale 0, conserva su valor.</li>
+<li><strong>clr</strong>: lo pone en 0.</li>
+</ul>
+<p>Si un registro se carga desde varias fuentes (un puerto, el sumador, el multiplicador…), necesita un <strong>MUX a su entrada</strong>.</p>
+<p>En el Ejemplo 1 del profesor el registro es además de desplazamiento, con control <code>p q</code>: 00 = nada, 01 = desplazar a la derecha con <code>r</code> como bit de entrada, 10 = desplazar a la izquierda, 11 = guardar (cargar).</p>
+<h3>7.2 Multiplexor (MUX)</h3>
+<p>Selecciona una de N entradas. Necesita ⌈log₂ N⌉ bits de selección.</p>
+<ul>
+<li>2 fuentes → MUX 2:1 → 1 bit</li>
+<li>3 o 4 fuentes → MUX 4:1 → 2 bits</li>
+<li>5 a 8 fuentes → MUX 8:1 → 3 bits</li>
+</ul>
+<p><strong>Regla de diseño: cada entrada de registro y cada entrada de unidad funcional que reciba datos de más de una fuente lleva un MUX.</strong> Si recibe de una sola fuente, va un cable directo.</p>
+<h3>7.3 ALU</h3>
+<p>Unidad que hace varias operaciones seleccionadas por bits de control. La ALU de las diapositivas usa <code>M s1 s0</code>:</p>
+<table>
+<thead>
+<tr>
+<th>M s1 s0</th>
+<th>Operación</th>
+<th>Truco de uso</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>000</td>
+<td>NOT B</td>
+<td></td>
+</tr>
+<tr>
+<td>001</td>
+<td>A AND B</td>
+<td><code>0 AND B = 0</code> → sirve para <strong>poner un registro en 0</strong></td>
+</tr>
+<tr>
+<td>010</td>
+<td>A OR B</td>
+<td><code>A OR 0 = A</code> → sirve para <strong>pasar A sin cambios</strong></td>
+</tr>
+<tr>
+<td>011</td>
+<td>A XNOR B</td>
+<td></td>
+</tr>
+<tr>
+<td>100</td>
+<td>A + 1</td>
+<td>Incremento; con A=0 da la constante <strong>1</strong></td>
+</tr>
+<tr>
+<td>101</td>
+<td>A + B</td>
+<td></td>
+</tr>
+<tr>
+<td>110</td>
+<td>A − B</td>
+<td>También sirve para <strong>comparar</strong> (mirar signo o cero)</td>
+</tr>
+<tr>
+<td>111</td>
+<td>A − 1</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>Estos trucos aparecen mucho: con una ALU no hace falta un MUX de &quot;constante 0&quot; o &quot;constante 1&quot; si se juega con las operaciones y con <code>enA = 0</code> / <code>enB = 0</code> (salidas del banco en cero).</p>
+<h3>7.4 Banco de registros</h3>
+<p>Un conjunto de 2^k registros con:</p>
+<ul>
+<li><strong>un puerto de escritura</strong>: <code>dirw</code> (k bits) + <code>wr</code> (1 bit),</li>
+<li><strong>dos puertos de lectura</strong>: <code>dirA</code> + <code>enA</code> y <code>dirB</code> + <code>enB</code>. Si <code>en = 0</code> la salida vale 0.</li>
+</ul>
+<p>Ventaja: ahorra multiplexores (el direccionamiento hace de MUX). Restricción: <strong>solo se escribe un registro por ciclo</strong> y solo se leen dos. Esto limita cuántas operaciones caben en un estado.</p>
+<p>Bits de control de un banco de 8 registros: <code>wr</code>(1) + <code>dirw</code>(3) + <code>enA</code>(1) + <code>dirA</code>(3) + <code>enB</code>(1) + <code>dirB</code>(3) = 12 bits.</p>
+<h3>7.5 Desplazador</h3>
+<p><code>&gt;&gt; 1</code> (derecha) divide entre 2 (enteros sin signo). <code>&lt;&lt; 1</code> multiplica por 2. Un desplazador de &quot;una posición&quot; (como en el parcial) obliga a hacer <code>&gt;&gt; 2</code> en <strong>dos estados</strong>, o a usar dos desplazadores en cascada.</p>
+<h3>7.6 Buffer three-state</h3>
+<p>Conecta el resultado al puerto de salida solo cuando <code>h = 1</code>. Con <code>h = 0</code> la salida queda en alta impedancia. Se activa normalmente en el estado final, junto con <code>Final = 1</code>.</p>
+<h3>7.7 Comparadores (generan las señales de estado)</h3>
+<p>Bloques combinacionales: <code>= 0</code>, <code>= 10</code>, <code>≥</code>, <code>&gt;</code>, bit menos significativo, bit de signo, overflow de la ALU. Cada pregunta de una caja de decisión que dependa de datos se convierte en un comparador y en <strong>una señal de estado</strong> de 1 bit hacia la UC.</p>
+<h3>7.8 Contadores/índices dedicados</h3>
+<p>Un registro con un sumador <code>+1</code> y un comparador (<code>i = 10</code>, <code>i ≥ n</code>). Los talleres los añadieron al CD como registros dedicados (<code>i</code>, <code>n</code>, <code>CONT</code>).</p>
+<hr>
+<h2>8. La palabra de control (PC)</h2>
+<p>La palabra de control es <strong>el conjunto de todos los bits que la UC envía al CD</strong>. Para construirla:</p>
+<ol>
+<li>Recorre el CD y anota <strong>cada</strong> entrada de control: selectores de MUX, LD de cada registro, operación de la ALU, <code>wr</code>/direcciones del banco, control del desplazador, <code>h</code> del three-state.</li>
+<li>Ordénalas en una tabla con un campo por señal. El número de bits total es la suma.</li>
+<li>Para cada estado del ASM, llena una fila con los valores que hacen que el CD ejecute las asignaciones de ese estado.</li>
+<li>Usa <strong>X (no importa)</strong> cuando el valor no afecta el resultado. Ojo: los <strong>habilitadores de escritura nunca son X</strong>. Si un registro no debe cambiar, su LD (o <code>wr</code>) tiene que valer <strong>0</strong>; si fuera X, podría sobrescribirse.</li>
+<li>La señal <code>Final</code> normalmente se agrega a la salida de la ROM de salida junto con la PC (por eso en el Ejemplo 1: 8 bits de PC + Final = 9).</li>
+</ol>
+<p>Ejemplo, el Ejemplo 1 del profesor (8 bits: <code>s | M s1 s0 | r p q | h</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Estado</th>
+<th>s</th>
+<th>M s1 s0</th>
+<th>r p q</th>
+<th>h</th>
+<th>Operación</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>PC0</td>
+<td>0</td>
+<td>001 (AND)</td>
+<td>X 1 1 (guardar)</td>
+<td>0</td>
+<td>suma = 0 (0 AND R = 0)</td>
+</tr>
+<tr>
+<td>PC1</td>
+<td>1</td>
+<td>101 (A+B)</td>
+<td>X 1 1 (guardar)</td>
+<td>0</td>
+<td>suma = suma + x</td>
+</tr>
+<tr>
+<td>PC2</td>
+<td>X</td>
+<td>XXX</td>
+<td>X 0 0 (nada)</td>
+<td>1</td>
+<td>resultado = suma</td>
+</tr>
+</tbody></table>
+<p>En PC2 la diapositiva escribe &quot;XXX&quot; en el registro. Lo más seguro es <code>p q = 00</code> (nada) para que no cambie mientras se muestra el resultado.</p>
+<hr>
+<h2>9. La unidad de control: implementación canónica con ROMs</h2>
+<h3>9.1 Estructura</h3>
+<pre><code>  Inicio ─┐
+  señales ┤
+  estado  │     ┌───────────┐  próximo   ┌──────────┐  estado    ┌───────────┐
+  (α,β..) └────►│ ROM DE    │──estado───►│ REGISTRO │──actual───►│ ROM DE    │──► PC (k bits)
+           ┌───►│ ENTRADA   │  (n bits)  │ (n FF-D) │  (n bits)  │ SALIDA    │──► Final
+           │    └───────────┘            └──────────┘     │      └───────────┘
+           │                                 ▲   ▲        │
+           │                                CLK RST       │
+           └───────────── realimentación del estado ──────┘
+</code></pre>
+<ul>
+<li><strong>Registro de estado</strong>: n flip-flops D, con n = ⌈log₂(número de estados)⌉. RST lo lleva al estado inicial S0.</li>
+<li><strong>ROM de entrada</strong> (lógica de próximo estado): dirección = estado actual + entradas de la UC; contenido = próximo estado.</li>
+<li><strong>ROM de salida</strong> (lógica de salida): dirección = estado actual (Moore); contenido = PC + Final.</li>
+</ul>
+<h3>9.2 Fórmulas de dimensionamiento</h3>
+<p>Sea:</p>
+<ul>
+<li>E = número de estados → <strong>n = ⌈log₂ E⌉</strong> bits de estado</li>
+<li>c = número de entradas de la UC (Inicio + señales de estado + otras entradas externas)</li>
+<li>k = bits de la palabra de control, f = salidas externas de control (normalmente 1: Final)</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Bloque</th>
+<th>Tamaño (palabras × bits)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Registro</td>
+<td>n bits</td>
+</tr>
+<tr>
+<td>ROM de entrada</td>
+<td><strong>2^(n + c) × n</strong></td>
+</tr>
+<tr>
+<td>ROM de salida (Moore)</td>
+<td><strong>2^n × (k + f)</strong></td>
+</tr>
+<tr>
+<td>ROM de salida (Mealy)</td>
+<td><strong>2^(n + c&#39;) × (k + f)</strong>, donde c&#39; = condiciones que influyen en las salidas</td>
+</tr>
+</tbody></table>
+<p>Comprobación con los ejemplos de clase:</p>
+<table>
+<thead>
+<tr>
+<th>Diseño</th>
+<th>E</th>
+<th>n</th>
+<th>c</th>
+<th>ROM entrada</th>
+<th>k+f</th>
+<th>ROM salida</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Σxᵢ (Ej. 1)</td>
+<td>3</td>
+<td>2</td>
+<td>2 (Inicio, α)</td>
+<td>2⁴ × 2 = <strong>16 × 2</strong></td>
+<td>8+1</td>
+<td>2² × 9 = <strong>4 × 9</strong></td>
+</tr>
+<tr>
+<td>Contador de unos (Ej. 2)</td>
+<td>8</td>
+<td>3</td>
+<td>2 (Inicio, α)</td>
+<td>2⁵ × 3 = <strong>32 × 3</strong></td>
+<td>19+1</td>
+<td>2³ × 20 = <strong>8 × 20</strong></td>
+</tr>
+<tr>
+<td>Contador de unos Moore (apuntes)</td>
+<td>6</td>
+<td>3</td>
+<td>3 (Inicio, α, β)</td>
+<td>2⁶ × 3 = <strong>64 × 3</strong></td>
+<td>5+1</td>
+<td>2³ × 6 = <strong>8 × 6</strong></td>
+</tr>
+<tr>
+<td>Contador de unos Mealy (apuntes)</td>
+<td>3</td>
+<td>2</td>
+<td>2 (Inicio, β)</td>
+<td>2⁴ × 2 = <strong>16 × 2</strong></td>
+<td>5+1</td>
+<td>2^(2+3) × 6 = <strong>32 × 6</strong></td>
+</tr>
+<tr>
+<td>Taller 6 (MSE)</td>
+<td>15</td>
+<td>4</td>
+<td>7</td>
+<td>2¹¹ × 4 = <strong>2048 × 4</strong></td>
+<td>18+1</td>
+<td>2⁴ × 19 = <strong>16 × 19</strong></td>
+</tr>
+<tr>
+<td>Taller 5 (media ponderada)</td>
+<td>36</td>
+<td>6</td>
+<td>8</td>
+<td>2¹⁴ × 6 = <strong>16384 × 6</strong></td>
+<td>30+2</td>
+<td>2⁶ × 32 = <strong>64 × 32</strong></td>
+</tr>
+</tbody></table>
+<p>En la versión Mealy de los apuntes, la ROM de salida recibe el estado (2 bits) más Inicio, α y β (3 bits) = 5 bits de dirección.</p>
+<h3>9.3 Cómo llenar las ROM (lo que te faltó en el parcial)</h3>
+<p><strong>ROM de entrada = tabla de transiciones.</strong> Una fila por cada combinación (estado actual, entradas). Para no escribir 2^(n+c) filas, se agrupan con X las entradas que no importan en ese estado:</p>
+<table>
+<thead>
+<tr>
+<th>Estado actual (Q)</th>
+<th>Inicio</th>
+<th>α</th>
+<th>Próximo estado (D)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>S0 = 00</td>
+<td>0</td>
+<td>X</td>
+<td>00</td>
+</tr>
+<tr>
+<td>S0 = 00</td>
+<td>1</td>
+<td>X</td>
+<td>01</td>
+</tr>
+<tr>
+<td>S1 = 01</td>
+<td>X</td>
+<td>0</td>
+<td>01</td>
+</tr>
+<tr>
+<td>S1 = 01</td>
+<td>X</td>
+<td>1</td>
+<td>10</td>
+</tr>
+<tr>
+<td>S2 = 10</td>
+<td>X</td>
+<td>X</td>
+<td>00</td>
+</tr>
+<tr>
+<td>11 (no usado)</td>
+<td>X</td>
+<td>X</td>
+<td>00 (o X)</td>
+</tr>
+</tbody></table>
+<p>Llevar los códigos no usados a S0 es una buena práctica: si el circuito cae en un estado inválido, vuelve al inicio.</p>
+<p><strong>ROM de salida = tabla de palabras de control.</strong> Una fila por estado con todos los bits de la PC y Final (como la tabla de la sección 8).</p>
+<h3>9.4 Otras implementaciones de la UC (Gajski, problema 8.18)</h3>
+<ul>
+<li><strong>Registro de estado + decodificador</strong>: el estado se codifica en binario, un decodificador n→2ⁿ produce una línea por estado y las señales de control se forman con compuertas OR de esas líneas.</li>
+<li><strong>Contador + decodificador</strong>: si la mayoría de transiciones son &quot;pasar al siguiente estado&quot;, el registro de estado se cambia por un contador. Avanza con <code>+1</code> y solo carga una dirección nueva cuando hay un salto (decisión).</li>
+<li><strong>Microprogramada</strong>: una ROM guarda <strong>microinstrucciones</strong>. Cada microinstrucción tiene la palabra de control + un campo de condición + una dirección de salto. Un contador de microprograma (μPC) indica la microinstrucción actual. La implementación con ROMs de clase es una forma de UC &quot;cableada en ROM&quot;.</li>
+<li><strong>One-hot</strong>: un flip-flop por estado. Usa más FF y menos lógica. Las herramientas de síntesis lo eligen a veces automáticamente; el Taller 5 reporta que ISE usó codificación Gray.</li>
+</ul>
+<hr>
+<h2>10. Optimización del camino de datos: tiempos de vida, <em>left-edge</em> y grafos</h2>
+<p>El objetivo es usar <strong>el mínimo hardware</strong>: pocos registros, pocas unidades funcionales y pocos multiplexores. Hay tres problemas de &quot;compartir&quot;:</p>
+<table>
+<thead>
+<tr>
+<th>Qué se comparte</th>
+<th>Condición para compartir</th>
+<th>Técnica</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Registros</strong> entre variables</td>
+<td>Sus tiempos de vida no se solapan</td>
+<td>Tabla de tiempos de vida + <em>left-edge</em></td>
+</tr>
+<tr>
+<td><strong>Unidades funcionales</strong> entre operaciones</td>
+<td>Las operaciones están en estados distintos</td>
+<td>Grafo de compatibilidad + partición en cliques</td>
+</tr>
+<tr>
+<td><strong>Conexiones/buses</strong> entre transferencias</td>
+<td>Las transferencias ocurren en estados distintos</td>
+<td>Grafo de compatibilidad de conexiones</td>
+</tr>
+</tbody></table>
+<h3>10.1 Tiempo de vida de una variable</h3>
+<p>Una variable está <strong>viva</strong> desde el estado siguiente a aquel en que se escribe hasta el último estado en que se lee.</p>
+<ul>
+<li>Se escribe en Sk → empieza a vivir en <strong>Sk+1</strong> (por la regla de la sección 2).</li>
+<li>Se lee por última vez en Sj → su vida termina en <strong>Sj</strong>.</li>
+<li><strong>Está viva en todos los estados intermedios, aunque no se use en ellos.</strong> Debe &quot;mantenerse viva&quot; porque su valor tiene que seguir guardado hasta que se lea. Ésta es la anotación del profesor en tu primera tabla: <em>&quot;las variables deben mantenerse vivas&quot;</em>.</li>
+</ul>
+<p>Se construye una tabla con las variables en filas, los estados en columnas y una X donde la variable está viva. Al pie se cuenta cuántas X hay por columna.</p>
+<blockquote>
+<p><strong>Número mínimo de registros = máximo número de variables vivas en un mismo estado</strong> (la columna con más X, también llamada <em>densidad máxima</em>).</p>
+</blockquote>
+<p>Dos variables pueden compartir registro si <strong>no tienen ninguna columna en común</strong>. Si una muere en Sj (se lee en Sj) y otra se escribe en Sj (nace en Sj+1), <strong>sí</strong> pueden compartir: en Sj se lee la vieja y al final de Sj se guarda la nueva.</p>
+<p>Variables de salida: si el resultado se muestra en el último estado desde un registro, ese registro está vivo hasta ese estado.</p>
+<h3>10.2 Algoritmo <em>left-edge</em> (del lado izquierdo)</h3>
+<p>Asigna variables a registros con el número mínimo (igual a la densidad máxima) cuando los tiempos de vida son intervalos continuos:</p>
+<ol>
+<li>Ordena las variables por <strong>estado de inicio</strong> (borde izquierdo) de menor a mayor.</li>
+<li>Abre un registro nuevo. Recorre la lista en orden: mete la primera variable libre; luego mete cada variable siguiente cuyo inicio sea <strong>mayor</strong> que el final de la última variable metida en ese registro.</li>
+<li>Quita de la lista las variables asignadas. Si quedan variables, vuelve al paso 2 con otro registro.</li>
+</ol>
+<p>Ejemplo pequeño (estados 1 a 5):</p>
+<table>
+<thead>
+<tr>
+<th>Var</th>
+<th>Vida</th>
+<th></th>
+<th>Orden por inicio: v1(1-2), v2(1-3), v3(3-4), v5(3-5), v4(4-5)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>v1</td>
+<td>1–2</td>
+<td></td>
+<td>R1: v1(1-2) → v3(3-4) → (v4 empieza en 4, choca) → fin. R1 = {v1, v3}</td>
+</tr>
+<tr>
+<td>v2</td>
+<td>1–3</td>
+<td></td>
+<td>R2: v2(1-3) → v4(4-5). R2 = {v2, v4}</td>
+</tr>
+<tr>
+<td>v3</td>
+<td>3–4</td>
+<td></td>
+<td>R3: v5(3-5). R3 = {v5}</td>
+</tr>
+<tr>
+<td>v4</td>
+<td>4–5</td>
+<td></td>
+<td>Densidad máxima (estado 3: v2, v3, v5) = 3 = registros usados ✓</td>
+</tr>
+<tr>
+<td>v5</td>
+<td>3–5</td>
+<td></td>
+<td></td>
+</tr>
+</tbody></table>
+<h3>10.3 Grafos de compatibilidad y de conflicto</h3>
+<ul>
+<li><strong>Grafo de compatibilidad</strong>: un nodo por variable (u operación, o conexión). Hay una arista entre dos nodos si <strong>pueden compartir</strong> recurso.</li>
+<li><strong>Grafo de conflicto</strong>: lo contrario (complemento). Hay arista si <strong>no pueden</strong> compartir. Minimizar recursos = <strong>colorear</strong> el grafo de conflicto con el mínimo de colores (cada color es un registro o unidad).</li>
+<li>Para variables con vidas en intervalos, el grafo de conflicto es un <em>grafo de intervalos</em>, y <em>left-edge</em> da el óptimo.</li>
+</ul>
+<p><strong>Pesos (prioridad).</strong> A una arista de compatibilidad se le pone un peso que mide cuánto conviene juntar esos dos nodos: por ejemplo, el número de fuentes o destinos que comparten (si dos variables vienen siempre del mismo sumador, ponerlas en el mismo registro ahorra entradas de MUX). En el libro las aristas llevan pesos como <code>2/1</code> (dos números de prioridad); el procedimiento es el mismo sumando ambos o usando el primero como prioridad principal.</p>
+<p><strong>Partición en cliques (agrupamiento)</strong> – algoritmo voraz del libro:</p>
+<ol>
+<li>Elige la arista de <strong>mayor peso</strong>.</li>
+<li>Une sus dos nodos en un <strong>supernodo</strong>.</li>
+<li>El supernodo solo conserva aristas hacia nodos que eran compatibles con <strong>todos</strong> sus miembros. El peso de la nueva arista es la <strong>suma</strong> de los pesos de las aristas hacia cada miembro.</li>
+<li>Repite hasta que no queden aristas. Cada supernodo final es un registro (o una unidad funcional, o un bus).</li>
+</ol>
+<p>Ejemplo con las variables de 10.2 (compatibles: v1–v3, v1–v4, v1–v5, v2–v4; pesos supuestos v1–v3 = 2, v2–v4 = 2, v1–v4 = 1, v1–v5 = 1):</p>
+<ul>
+<li>Mayor peso: v1–v3 (2) → supernodo {v1,v3}. ¿Compatible con v4? v3–v4 no → se pierde. ¿Con v5? v3–v5 no → se pierde.</li>
+<li>Siguiente: v2–v4 (2) → {v2,v4}.</li>
+<li>Queda v5 sola. Resultado: {v1,v3}, {v2,v4}, {v5} → 3 registros.</li>
+</ul>
+<h3>10.4 Compartir unidades funcionales</h3>
+<ul>
+<li>Dos operaciones son compatibles si están en <strong>estados distintos</strong> y una misma unidad puede hacer ambas (por ejemplo, una ALU hace + y −).</li>
+<li><strong>Número mínimo de unidades de un tipo = máximo número de operaciones de ese tipo en un mismo estado.</strong></li>
+<li>Al asignar operaciones a una unidad, aprovecha la <strong>conmutatividad</strong> (a·b = b·a) para que cada entrada de la unidad reciba el menor número de fuentes distintas: así los MUX de entrada son más pequeños.</li>
+</ul>
+<h3>10.5 Compartir conexiones (buses)</h3>
+<p>Si dos transferencias ocurren en estados diferentes, pueden usar el mismo bus. Se arma el grafo de compatibilidad de conexiones y se particiona igual. Menos buses implican menos cables pero más MUX/three-states.</p>
+<hr>
+<h2>11. Planificación (<em>scheduling</em>)</h2>
+<p>Planificar es decidir <strong>en qué estado (paso de control) va cada operación</strong>. Se parte del <strong>grafo de flujo de datos (DFG)</strong>: un nodo por operación y una flecha de cada operación a las que usan su resultado.</p>
+<h3>11.1 ASAP (<em>As Soon As Possible</em>)</h3>
+<p>Cada operación va en el <strong>primer</strong> estado posible: un paso después de su última operación predecesora. Sin límite de recursos.</p>
+<ul>
+<li>Da el <strong>mínimo número de estados</strong> (la longitud del camino crítico).</li>
+<li>Suele concentrar muchas operaciones en los primeros estados (muchos recursos).</li>
+</ul>
+<h3>11.2 ALAP (<em>As Late As Possible</em>)</h3>
+<p>Fijado un número total de estados (normalmente el de ASAP), cada operación va en el <strong>último</strong> estado posible, de atrás hacia adelante.</p>
+<h3>11.3 Movilidad</h3>
+<p><strong>Movilidad = estado ALAP − estado ASAP.</strong></p>
+<ul>
+<li>Movilidad 0 → la operación está en el <strong>camino crítico</strong>: no se puede mover sin alargar el diseño.</li>
+<li>Movilidad &gt; 0 → la operación tiene holgura y se puede mover para repartir recursos.</li>
+</ul>
+<h3>11.4 Planificación con restricción de tiempo (TC, <em>time-constrained</em>)</h3>
+<p>Se fija el número de estados y se busca el <strong>mínimo de recursos</strong>. Cada operación se coloca dentro de su ventana [ASAP, ALAP] intentando que en ningún estado se acumulen muchas del mismo tipo.</p>
+<h3>11.5 Planificación con restricción de recursos (RC, <em>resource-constrained</em>) – <em>list scheduling</em></h3>
+<p>Se fija el número de unidades de cada tipo y se busca el <strong>mínimo de estados</strong>:</p>
+<ol>
+<li>Estado actual = 1.</li>
+<li>Lista de operaciones <strong>listas</strong> (todos sus predecesores ya terminaron en estados anteriores).</li>
+<li>Ordénalas por <strong>prioridad</strong>: menor movilidad primero (o mayor longitud de camino hasta el final).</li>
+<li>Asigna al estado actual tantas como unidades de cada tipo haya.</li>
+<li>Pasa al siguiente estado y repite.</li>
+</ol>
+<p>Esto es exactamente lo que tienes que hacer en el parcial cuando te dicen &quot;dispone de una unidad de suma y otra de multiplicación&quot;: es un problema RC.</p>
+<hr>
+<h2>12. Encadenamiento y multiciclo</h2>
+<p><strong>Encadenamiento (<em>chaining</em>).</strong> Poner dos operaciones <strong>dependientes</strong> en el mismo estado, conectando la salida de una unidad directamente a la entrada de la otra sin registro intermedio.</p>
+<ul>
+<li>Ventaja: menos estados.</li>
+<li>Costo: el periodo de reloj debe cubrir la suma de los dos retardos.</li>
+<li>Ejemplo: <code>t = (a + b) &gt;&gt; 1</code> en un estado si el desplazador está a la salida del sumador (como el desplazador después de la ALU en el Ejemplo 2 del profesor: ALU + desplazador se encadenan en un ciclo).</li>
+</ul>
+<p><strong>Multiciclo.</strong> Una operación lenta (multiplicación, por ejemplo) ocupa <strong>dos o más</strong> ciclos de reloj.</p>
+<ul>
+<li>Ventaja: el reloj se ajusta a las operaciones rápidas y es más corto.</li>
+<li>Costo: la unidad queda ocupada varios ciclos y sus entradas deben permanecer estables. En el ASM la operación se reparte en dos estados seguidos (en el primero se lanza, en el segundo se guarda el resultado).</li>
+</ul>
+<p>Los dos son la misma idea vista al revés: decidir cuánto trabajo combinacional cabe en un periodo de reloj.</p>
+<hr>
+<h2>13. Segmentación (<em>pipelining</em>)</h2>
+<p>Segmentar es dividir un trabajo en <strong>etapas</strong> separadas por <strong>registros de segmentación</strong>, para que varias datos se procesen a la vez, cada uno en una etapa distinta. Funciona como una cadena de montaje.</p>
+<h3>13.1 Métricas</h3>
+<p>Para k etapas, retardo de la etapa más lenta t_max y retardo de registro t_reg:</p>
+<ul>
+<li><p><strong>Periodo de reloj</strong>: T = t_max + t_reg (manda la etapa más lenta).</p>
+</li>
+<li><p><strong>Latencia</strong> (tiempo de un dato de entrada a salida): k · T.</p>
+</li>
+<li><p><strong>Productividad (<em>throughput</em>)</strong>: un resultado por ciclo, 1/T, una vez lleno el pipeline.</p>
+</li>
+<li><p><strong>Tiempo para N datos</strong>: (k + N − 1) · T.</p>
+</li>
+<li><p><strong>Ganancia (<em>speedup</em>)</strong> frente a la versión sin segmentar (que tarda t_total por dato):</p>
+<p>S = (N · t_total) / ((k + N − 1) · T)  → para N grande, S ≈ t_total / T ≤ k</p>
+</li>
+</ul>
+<p>Conclusiones que suelen preguntar:</p>
+<ul>
+<li>La ganancia ideal es <strong>k</strong> (el número de etapas) si todas las etapas duran igual y el registro no cuesta nada.</li>
+<li><strong>Las etapas desbalanceadas reducen la ganancia</strong>: manda la más lenta.</li>
+<li>La segmentación <strong>no reduce la latencia</strong> (normalmente la aumenta un poco). Mejora la productividad.</li>
+<li>Más etapas no siempre ayudan: si el trabajo no se puede dividir más finamente, la etapa más lenta no baja.</li>
+</ul>
+<h3>13.2 Tres tipos de segmentación (Gajski)</h3>
+<ol>
+<li><strong>Unidades funcionales segmentadas.</strong> Una unidad (por ejemplo, el multiplicador) se parte en etapas internas. Puede aceptar una operación nueva cada ciclo, pero el resultado sale <strong>varios ciclos después</strong>. En el ASM, una operación lanzada en Si tiene su resultado disponible en Si+etapas.</li>
+<li><strong>Camino de datos segmentado.</strong> Todo el algoritmo se divide en etapas, cada una con su propio hardware, y entre ellas hay registros. Entra un dato nuevo cada ciclo.</li>
+<li><strong>Control segmentado.</strong> Se ponen registros en la propia comunicación UC↔CD:<ul>
+<li><strong>Registro de estado</strong> (entre las señales de estado del CD y la UC): la UC ve la condición <strong>un ciclo tarde</strong>. La decisión se toma con información atrasada; hay que añadir un estado de espera o reordenar operaciones.</li>
+<li><strong>Registro de control</strong> (entre la ROM de salida y el CD): el CD ejecuta la palabra de control <strong>un ciclo después</strong> de que la UC entra al estado.</li>
+<li>Con ambos registros, la UC y el CD trabajan desfasados dos ciclos en las decisiones.</li>
+<li>Ventaja: se corta el camino crítico UC → CD → UC y el reloj es más rápido.</li>
+</ul>
+</li>
+</ol>
+<hr>
+<h2>14. Periodo de reloj y camino crítico</h2>
+<p>El periodo mínimo de reloj es el <strong>retardo de registro a registro más largo</strong> (<em>camino crítico</em>). En un FSMD hay tres tipos de caminos:</p>
+<ol>
+<li><strong>Camino del CD</strong>: registro → (lectura banco / MUX) → unidad funcional → MUX → entrada del registro.</li>
+<li><strong>Camino de próximo estado</strong>: registro de estado → ROM de entrada → registro de estado.</li>
+<li><strong>Camino de estado</strong> (cuando hay decisiones): registro del CD → comparador → ROM de entrada → registro de estado.</li>
+</ol>
+<ul>
+<li><strong>Moore (basado en estados):</strong> las señales de control salen del registro de estado a través de la ROM de salida, así que el camino 1 empieza con el retardo de la ROM de salida:
+T ≥ máx( t_ROMsal + t_CD , t_comparador + t_ROMent ) + t_setup + t_clk→Q</li>
+<li><strong>Mealy (basado en entradas):</strong> las señales de control dependen además de las señales de estado. El camino peor es: registro del CD → comparador → ROM de salida → MUX/unidad funcional del CD → registro. Por eso <strong>Mealy suele tener periodo más largo</strong>.</li>
+</ul>
+<p>Los talleres reportan esto en ISE: Taller 6, periodo mínimo 7,952 ns (125,75 MHz), y el camino crítico estaba en el registro RESIDUO por la comparación <code>RESIDUO ≥ N</code> + resta. Es un camino tipo 1 + 3.</p>
+<hr>
+<h2>15. Técnicas algorítmicas de los talleres</h2>
+<p>Estas técnicas sirven cuando el enunciado <strong>prohíbe</strong> multiplicadores o divisores, o cuando solo hay un sumador/ALU.</p>
+<p><strong>Multiplicación por sumas sucesivas</strong> (A · B con B ≥ 0):</p>
+<pre><code> P = 0 ; C = B
+ mientras C &gt; 0:  P = P + A ; C = C − 1
+</code></pre>
+<p>En el ASM es un estado que se repite en lazo con una decisión <code>C &gt; 0</code> (señal de estado: comparador &quot;C = 0&quot;).</p>
+<p><strong>División por restas sucesivas</strong> (cociente Q y residuo R de A / B):</p>
+<pre><code> R = A ; Q = 0
+ mientras R ≥ B:  R = R − B ; Q = Q + 1
+</code></pre>
+<p>Señal de estado: <code>R ≥ B</code> (comparador o bit de signo de R − B).</p>
+<p><strong>Decimales</strong> (Taller 5): tras la parte entera, multiplicar el residuo por 10 y volver a dividir: el cociente es el primer decimal. Repetir para el segundo.
+<strong>Punto fijo escalado</strong> (Taller 6): multiplicar el numerador por 100 antes de dividir. El resultado entero representa el valor × 100 (400 → 4,00).</p>
+<p><strong>Signo</strong> (Taller 5): con datos en complemento a 2, revisar el bit más significativo. Si es 1, guardar <code>SIGNO = 1</code> y trabajar con el valor absoluto (complemento a 2: NOT + 1). Al final se muestra el signo aparte.</p>
+<p><strong>Overflow</strong>: cada suma que pueda desbordar se sigue de una decisión <code>OV</code>. Si OV = 1, saltar a un estado de error (salida = 0, LED de overflow). El Taller 6 compara además con 65535 (máximo de 16 bits).</p>
+<p><strong>Cuadrado de un número</strong> (Taller 6): |d| sumado |d| veces (sumas sucesivas sobre el valor absoluto).</p>
+<p><strong>Coste</strong>: estas técnicas cambian hardware por tiempo. Un estado de lazo se ejecuta muchas veces, así que el número de <strong>estados</strong> del ASM es pequeño pero el número de <strong>ciclos</strong> depende de los datos.</p>
+<hr>
+<h1>PARTE II: EJERCICIOS RESUELTOS</h1>
+<h2>E1. Ejemplo 1 del profesor: f = Σ xᵢ (i = 1..10), CD preestablecido</h2>
+<p><strong>Enunciado.</strong> Diseñar con UC+CD el cálculo de la suma de 10 datos de 16 bits que llegan por <code>Inport</code>. Empieza con <code>Inicio = 1</code>; el resultado se muestra solo al terminar (<code>Final = 1</code>).</p>
+<p><strong>CD dado:</strong> MUX (s: 1 = Inport, 0 = constante 0) → entrada A de la ALU; entrada B de la ALU ← salida del Registro R; ALU → Registro R (control r, p, q); contador i con +1 y comparador con 10 → α; three-state <code>h</code> → Outport.</p>
+<p><strong>Paso 1 – Pseudoalgoritmo</strong></p>
+<pre><code>Final = 0
+si Inicio = 1:
+   suma = 0                      ← estado 0
+   ciclo i = 1..10:
+      suma = suma + x            ← estado 1 (se repite)
+   resultado = suma; Final = 1   ← estado 2
+</code></pre>
+<p><strong>Paso 2 – Entradas y salidas de cada bloque</strong></p>
+<ul>
+<li>UC: entradas Inicio, α (i = 10); salidas Final, PC de 8 bits.</li>
+<li>CD: entradas Inport (16), PC (8); salidas Outport (16), α.</li>
+</ul>
+<p><strong>Paso 3 – Palabra de control</strong> (8 bits = s + M s1 s0 + r p q + h):</p>
+<table>
+<thead>
+<tr>
+<th>PC</th>
+<th>s</th>
+<th>M s1 s0</th>
+<th>r p q</th>
+<th>h</th>
+<th>Qué hace el CD</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>PC0</td>
+<td>0</td>
+<td>001 (AND)</td>
+<td>X 1 1</td>
+<td>0</td>
+<td>A = 0 → 0 AND R = 0 → R = 0 (suma = 0)</td>
+</tr>
+<tr>
+<td>PC1</td>
+<td>1</td>
+<td>101 (A+B)</td>
+<td>X 1 1</td>
+<td>0</td>
+<td>A = x, B = R → R = R + x</td>
+</tr>
+<tr>
+<td>PC2</td>
+<td>X</td>
+<td>XXX</td>
+<td>X 0 0</td>
+<td>1</td>
+<td>R se conserva y sale por Outport</td>
+</tr>
+</tbody></table>
+<p>Por qué AND para poner a cero: el MUX con s = 0 entrega 0 a la entrada A, y <code>0 AND B = 0</code> sin importar lo que tenga R.</p>
+<p><strong>Paso 4 – Diagrama de estados (Moore)</strong></p>
+<pre><code>         Inicio=0
+          ┌──┐
+          ▼  │
+        ┌──────┐  Inicio=1   ┌──────┐  α=1   ┌──────┐
+ RST──► │  s0  │ ──────────► │  s1  │ ─────► │  s2  │
+        │PC0   │             │PC1   │        │PC2   │
+        │Final=0│            │Final=0│       │Final=1│
+        └──────┘             └──────┘        └──────┘
+            ▲                  │  ▲              │
+            │                  └──┘ α=0          │
+            └────────────────────────────────────┘
+</code></pre>
+<p>Detalle que conviene comentar en un examen: en el CD de la diapositiva el contador <code>i</code> no tiene señales de control. En un diseño completo <code>i</code> debería ponerse a 1 (o 0) en s0 y avanzar solo en s1; si no, α no indicaría el dato 10 correcto. Si te preguntan cómo completarlo: agrega a <code>i</code> un MUX de &quot;carga 1 / i+1&quot; y un LD controlados por la UC (2 bits más en la PC).</p>
+<p><strong>Paso 5 – Unidad de control</strong></p>
+<ul>
+<li>3 estados → <strong>n = 2 bits</strong> de registro.</li>
+<li>ROM de entrada: entradas Inicio, α + 2 bits de estado = 4 → <strong>2⁴ × 2 = 16 × 2</strong>.</li>
+<li>ROM de salida: 2 bits de estado → 4 palabras de 8 + 1 (Final) → <strong>4 × 9</strong>.</li>
+</ul>
+<p>Contenido de la ROM de entrada (dirección = Inicio α q1 q0):</p>
+<table>
+<thead>
+<tr>
+<th>Inicio</th>
+<th>α</th>
+<th>q1 q0 (actual)</th>
+<th>D1 D0 (próximo)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>0</td>
+<td>X</td>
+<td>00 (s0)</td>
+<td>00</td>
+</tr>
+<tr>
+<td>1</td>
+<td>X</td>
+<td>00 (s0)</td>
+<td>01</td>
+</tr>
+<tr>
+<td>X</td>
+<td>0</td>
+<td>01 (s1)</td>
+<td>01</td>
+</tr>
+<tr>
+<td>X</td>
+<td>1</td>
+<td>01 (s1)</td>
+<td>10</td>
+</tr>
+<tr>
+<td>X</td>
+<td>X</td>
+<td>10 (s2)</td>
+<td>00</td>
+</tr>
+<tr>
+<td>X</td>
+<td>X</td>
+<td>11</td>
+<td>00 (no usado)</td>
+</tr>
+</tbody></table>
+<p>Contenido de la ROM de salida:</p>
+<table>
+<thead>
+<tr>
+<th>q1 q0</th>
+<th>PC</th>
+<th>Final</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>00</td>
+<td>PC0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>01</td>
+<td>PC1</td>
+<td>0</td>
+</tr>
+<tr>
+<td>10</td>
+<td>PC2</td>
+<td>1</td>
+</tr>
+<tr>
+<td>11</td>
+<td>X</td>
+<td>X</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>E2. Ejemplo 2 del profesor: contador de unos con banco de registros</h2>
+<p><strong>Enunciado.</strong> Contar cuántos 1 tiene una palabra de 16 bits que entra por Inport, y sacar el resultado por Outport con <code>Final = 1</code>.</p>
+<p><strong>CD dado:</strong> MUX (s: Inport / realimentación) → banco de 8 registros (dirw, wr, dirA, enA, dirB, enB) → salidas A y B → ALU (M s1 s0) → desplazador (p q: 00 pasar, 01 derecha, 10 izquierda, 11 nada) → realimentación al MUX y three-state h → Outport. Comparador <code>= 0</code> sobre la salida A → α.</p>
+<p><strong>Pseudoalgoritmo</strong> (registros: Dato = R2, cuenta = R1, aux = R3, Bls = R4)</p>
+<pre><code>Final = 0
+si Inicio = 1:
+ 1  Dato = Inport
+ 2  cuenta = 0
+ 3  aux = 1
+    mientras Dato ≠ 0:
+ 4     Bls = Dato AND aux        (aísla el bit menos significativo)
+ 5     cuenta = cuenta + Bls
+ 6     Dato = Dato &gt;&gt; 1
+ 7  Outport = cuenta ; Final = 1
+</code></pre>
+<p><strong>Traza con Dato = 100010:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Iteración</th>
+<th>Dato</th>
+<th>Dato AND aux</th>
+<th>cuenta</th>
+<th>Dato &gt;&gt; 1</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>100010</td>
+<td>000000</td>
+<td>0</td>
+<td>010001</td>
+</tr>
+<tr>
+<td>2</td>
+<td>010001</td>
+<td>000001</td>
+<td>1</td>
+<td>001000</td>
+</tr>
+<tr>
+<td>3</td>
+<td>001000</td>
+<td>000000</td>
+<td>1</td>
+<td>000100</td>
+</tr>
+<tr>
+<td>4</td>
+<td>000100</td>
+<td>000000</td>
+<td>1</td>
+<td>000010</td>
+</tr>
+<tr>
+<td>5</td>
+<td>000010</td>
+<td>000000</td>
+<td>1</td>
+<td>000001</td>
+</tr>
+<tr>
+<td>6</td>
+<td>000001</td>
+<td>000001</td>
+<td>2</td>
+<td>000000</td>
+</tr>
+</tbody></table>
+<p>Resultado: 2 ✓.</p>
+<p><strong>Palabra de control</strong> (19 bits: s 1, enA 1, dirA 3, enB 1, dirB 3, wr 1, dirw 3, M s1 s0 3, p q 2, h 1):</p>
+<table>
+<thead>
+<tr>
+<th>Estado</th>
+<th>s</th>
+<th>enA</th>
+<th>dirA</th>
+<th>enB</th>
+<th>dirB</th>
+<th>wr</th>
+<th>dirw</th>
+<th>ALU</th>
+<th>pq</th>
+<th>h</th>
+<th>Operación</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>s1</td>
+<td>0</td>
+<td>X</td>
+<td>XXX</td>
+<td>X</td>
+<td>XXX</td>
+<td>1</td>
+<td>010</td>
+<td>XXX</td>
+<td>XX</td>
+<td>0</td>
+<td>R2 ← Inport</td>
+</tr>
+<tr>
+<td>s2</td>
+<td>1</td>
+<td>0</td>
+<td>XXX</td>
+<td>0</td>
+<td>XXX</td>
+<td>1</td>
+<td>001</td>
+<td>OR 010</td>
+<td>00</td>
+<td>0</td>
+<td>R1 ← 0 OR 0 = 0</td>
+</tr>
+<tr>
+<td>s3</td>
+<td>1</td>
+<td>0</td>
+<td>XXX</td>
+<td>X</td>
+<td>XXX</td>
+<td>1</td>
+<td>011</td>
+<td>INC 100</td>
+<td>00</td>
+<td>0</td>
+<td>R3 ← 0 + 1 = 1</td>
+</tr>
+<tr>
+<td>s4</td>
+<td>1</td>
+<td>1</td>
+<td>010</td>
+<td>1</td>
+<td>011</td>
+<td>1</td>
+<td>100</td>
+<td>AND 001</td>
+<td>00</td>
+<td>0</td>
+<td>R4 ← R2 AND R3</td>
+</tr>
+<tr>
+<td>s5</td>
+<td>1</td>
+<td>1</td>
+<td>001</td>
+<td>1</td>
+<td>100</td>
+<td>1</td>
+<td>001</td>
+<td>ADD 101</td>
+<td>00</td>
+<td>0</td>
+<td>R1 ← R1 + R4</td>
+</tr>
+<tr>
+<td>s6</td>
+<td>1</td>
+<td>1</td>
+<td>010</td>
+<td>0</td>
+<td>XXX</td>
+<td>1</td>
+<td>010</td>
+<td>OR 010</td>
+<td>01</td>
+<td>0</td>
+<td>R2 ← (R2 OR 0) &gt;&gt; 1</td>
+</tr>
+<tr>
+<td>s7</td>
+<td>X</td>
+<td>1</td>
+<td>001</td>
+<td>0</td>
+<td>XXX</td>
+<td>0</td>
+<td>XXX</td>
+<td>OR 010</td>
+<td>00</td>
+<td>1</td>
+<td>Outport ← R1</td>
+</tr>
+</tbody></table>
+<p>Trucos que usa el profesor:</p>
+<ul>
+<li><code>enA = 0</code> y <code>enB = 0</code> hacen A = B = 0. Con OR da 0 (s2) y con INC da 1 (s3): <strong>constantes sin MUX extra</strong>.</li>
+<li><code>A OR 0 = A</code> sirve para <strong>pasar</strong> un registro por la ALU (s6, s7).</li>
+<li>El desplazador está <strong>encadenado</strong> a la ALU: en s6 se lee, se pasa por la ALU y se desplaza en un solo ciclo.</li>
+<li>En s7 <code>wr = 0</code> (no se escribe nada). En s0 (PC0 = X) también debe ser <code>wr = 0</code> y <code>h = 0</code> para no dañar datos.</li>
+</ul>
+<p><strong>Diagrama de estados:</strong></p>
+<pre><code> s0 ─Inicio=1─► s1 ─► s2 ─► s3 ─► s4 ─► s5 ─► s6 ─α=1─► s7 ─► s0
+ ▲└Inicio=0┘                      ▲             │
+                                  └────α=0──────┘
+</code></pre>
+<p><strong>Detalle fino (sirve para una pregunta de análisis).</strong> α se calcula sobre la <strong>salida A</strong> del banco. En s6 la salida A es R2 = Dato <strong>antes</strong> de desplazar. Por tanto la pregunta &quot;¿Dato = 0?&quot; se responde con el valor viejo y el lazo hace <strong>una iteración de más</strong> (con Dato = 0, Bls = 0 y cuenta no cambia). El resultado es correcto pero se gasta una vuelta extra. Si te piden optimizar, mira la pista del problema 8.2: el bit menos significativo de Dato está disponible a la salida de la ALU/desplazador, así que se puede ahorrar <code>aux</code> y <code>Bls</code>.</p>
+<p><strong>UC:</strong> 8 estados → 3 bits. ROM de entrada: Inicio + α + 3 = 5 bits → <strong>32 × 3</strong>. ROM de salida: <strong>8 × 20</strong> (19 PC + Final).</p>
+<p>Filas de la ROM de entrada (Q2 Q1 Q0 = número de estado):</p>
+<table>
+<thead>
+<tr>
+<th>Actual</th>
+<th>Condición</th>
+<th>Próximo</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>000 (s0)</td>
+<td>Inicio = 0</td>
+<td>000</td>
+</tr>
+<tr>
+<td>000 (s0)</td>
+<td>Inicio = 1</td>
+<td>001</td>
+</tr>
+<tr>
+<td>001 → 010 → 011 → 100 → 101 → 110</td>
+<td>incondicional</td>
+<td>siguiente</td>
+</tr>
+<tr>
+<td>110 (s6)</td>
+<td>α = 0</td>
+<td>100 (s4)</td>
+</tr>
+<tr>
+<td>110 (s6)</td>
+<td>α = 1</td>
+<td>111 (s7)</td>
+</tr>
+<tr>
+<td>111 (s7)</td>
+<td>incondicional</td>
+<td>000</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>E3. Contador de unos de los apuntes: Moore vs Mealy</h2>
+<p>Aquí el CD es <strong>a la medida</strong> (no preestablecido): registro Dato (16 bits) con MUX Inport/realimentación y desplazador <code>&gt;&gt;1</code>; registro Cuenta (5 bits) con MUX 0/realimentación y sumador +1; three-state a Salida. Señales de estado: <strong>α = Dato_LSB</strong> (bit menos significativo) y <strong>β = (Dato = 0)</strong>.</p>
+<p>Palabra de control de 5 bits: ① sel MUX Dato, ② sel MUX Cuenta, ③ LD Dato, ④ LD Cuenta, ⑤ h.</p>
+<p>¿Por qué Cuenta tiene 5 bits? El máximo de unos en 16 bits es 16 = 10000₂, que necesita 5 bits.</p>
+<h3>Versión Moore (6 estados)</h3>
+<pre><code> S0: Final=0 ──Inicio=0──► S0
+             ──Inicio=1──► S1
+ S1: Dato=Inport, Cuenta=0 ─► S2
+ S2: (evaluar α) ──α=1──► S3
+                 ──α=0──► S4
+ S3: Cuenta=Cuenta+1 ─► S4
+ S4: Dato=Dato&gt;&gt;1 ──β=0 (Dato≠0)──► S2
+                  ──β=1 (Dato=0)──► S5
+ S5: Salida=Cuenta, Final=1 ─► S0
+</code></pre>
+<p>(En los apuntes β se dibuja como la pregunta &quot;Dato = 0&quot;. Recuerda que en S4 la decisión ve el Dato <strong>viejo</strong>; como el lazo vuelve a S2 y vuelve a preguntar, el resultado es correcto y como mucho hay una vuelta extra.)</p>
+<p>ROM de salida Moore:</p>
+<table>
+<thead>
+<tr>
+<th>Estado</th>
+<th>①</th>
+<th>②</th>
+<th>③</th>
+<th>④</th>
+<th>⑤</th>
+<th>Final</th>
+<th>Operación</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>0</td>
+<td>X</td>
+<td>X</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>nada</td>
+</tr>
+<tr>
+<td>1</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>1</td>
+<td>0</td>
+<td>0</td>
+<td>Dato = Inport, Cuenta = 0</td>
+</tr>
+<tr>
+<td>2</td>
+<td>X</td>
+<td>X</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>evaluar α</td>
+</tr>
+<tr>
+<td>3</td>
+<td>X</td>
+<td>1</td>
+<td>0</td>
+<td>1</td>
+<td>0</td>
+<td>0</td>
+<td>Cuenta = Cuenta + 1</td>
+</tr>
+<tr>
+<td>4</td>
+<td>1</td>
+<td>X</td>
+<td>1</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>Dato = Dato &gt;&gt; 1</td>
+</tr>
+<tr>
+<td>5</td>
+<td>X</td>
+<td>X</td>
+<td>0</td>
+<td>0</td>
+<td>1</td>
+<td>1</td>
+<td>Salida = Cuenta</td>
+</tr>
+</tbody></table>
+<p>En la fila 1 fíjate en los selectores: en este CD la entrada 0 de cada MUX es Inport (para Dato) y la constante 0 (para Cuenta). Por eso sel Dato = 0 y sel Cuenta = 0, con ambos LD en 1. En tus apuntes esa casilla tiene un tachón; si lees un 1 en la primera columna, corrígelo a 0.</p>
+<p>UC Moore: 6 estados → 3 bits; ROM entrada 2^(3+3) = <strong>64 × 3</strong> (Inicio, α, β); ROM salida 2³ × 6 = <strong>8 × 6</strong>.</p>
+<h3>Versión Mealy (3 estados)</h3>
+<pre><code> S0: Final=0
+     Inicio=0 → S0
+     Inicio=1 → (Dato=Inport, Cuenta=0) → S1          [asignación condicional]
+ S1: α=1 → (Cuenta=Cuenta+1)                         [asignación condicional]
+     β=0 → (Dato=Dato&gt;&gt;1) → S1                        [asignación condicional]
+     β=1 → S2
+ S2: Salida=Cuenta, Final=1 → S0
+</code></pre>
+<p>Ahora la palabra de control depende del estado <strong>y</strong> de Inicio, α, β. Por eso hay 7 palabras distintas (PC0…PC6) con solo 3 estados:</p>
+<table>
+<thead>
+<tr>
+<th>PC</th>
+<th>Cuándo</th>
+<th>Operación</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>PC0</td>
+<td>S0, Inicio = 0</td>
+<td>nada</td>
+</tr>
+<tr>
+<td>PC1</td>
+<td>S0, Inicio = 1</td>
+<td>Dato = Inport, Cuenta = 0</td>
+</tr>
+<tr>
+<td>PC2</td>
+<td>S1, α = 0, β = 0</td>
+<td>Dato = Dato &gt;&gt; 1</td>
+</tr>
+<tr>
+<td>PC3</td>
+<td>S1, α = 1, β = 0</td>
+<td>Cuenta + 1 y Dato &gt;&gt; 1 (a la vez)</td>
+</tr>
+<tr>
+<td>PC4</td>
+<td>S1, α = 0, β = 1</td>
+<td>nada</td>
+</tr>
+<tr>
+<td>PC5</td>
+<td>S1, α = 1, β = 1</td>
+<td>Cuenta = Cuenta + 1</td>
+</tr>
+<tr>
+<td>PC6</td>
+<td>S2</td>
+<td>Salida = Cuenta, Final = 1</td>
+</tr>
+</tbody></table>
+<p>UC Mealy: 3 estados → 2 bits; ROM entrada: 2 + Inicio + β = 4 → <strong>16 × 2</strong>; ROM salida: 2 + Inicio + α + β = 5 → <strong>32 × 6</strong>. Observa que en el circuito de los apuntes α <strong>solo</strong> entra a la ROM de salida (no afecta el próximo estado) e Inicio y β entran a las dos.</p>
+<p><strong>Conclusión para el examen:</strong> Mealy reduce estados (y ciclos: hace dos operaciones por vuelta en S1) pero agranda la ROM de salida y alarga el camino crítico.</p>
+<hr>
+<h2>E4. Lo que enseñan los Talleres 5 y 6 sobre dimensionamiento</h2>
+<p><strong>Taller 5 (media ponderada, CD preestablecido + bloques añadidos).</strong></p>
+<ul>
+<li>36 estados (S0–S35, incluido el estado de error por overflow) → <strong>6 bits</strong>.</li>
+<li>Entradas de la UC: INICIO, ENTER, π, α, β, φ, OV_ALU, SIGNO = 8 → ROM de entrada <strong>2¹⁴ × 6 = 16384 × 6</strong>.</li>
+<li>PC de 30 bits + FINAL + OV_OUT = 32 → ROM de salida <strong>2⁶ × 32 = 64 × 32</strong>.</li>
+<li>La tabla de PC muestra el método: cada campo (S_MUX_IN 2 bits, wr, en_A, en_B, sel_dir, DIR_W/A/B 4 bits cada una, ALU_OP 3 bits, h, clr, we…) con un valor por estado. Mira cómo <strong>los <code>wr</code>/<code>we</code> nunca son X</strong>, mientras que direcciones y operaciones que no se usan sí lo son.</li>
+<li>Técnica destacada: el estado <code>S8: PRODUCTO ← PRODUCTO + X[i]</code> lee A con dirección de la UC y B con el índice <code>i</code> (<code>s_dA = 1</code>, <code>s_dB = 0</code>). Es decir, el banco se direcciona a veces por la UC y a veces por un registro índice, con un MUX de dirección.</li>
+</ul>
+<p><strong>Taller 6 (error cuadrático medio, CD de alto nivel).</strong></p>
+<ul>
+<li>15 estados → <strong>4 bits</strong>.</li>
+<li>6 señales de estado + INICIO = 7 → ROM de entrada <strong>2¹¹ × 4 = 2048 × 4</strong>.</li>
+<li>ISE sintetizó una PC de 18 bits + FINAL → ROM de salida <strong>16 × 19</strong>. (En el informe aparece &quot;2⁴ × 39&quot; y luego &quot;16 × XX&quot;; el valor que corresponde a lo sintetizado es 16 × 19.)</li>
+<li>Técnica destacada: <strong>un mismo estado se repite muchos ciclos</strong> (lazos de sumas/restas sucesivas), así que pocos estados no significan pocos ciclos.</li>
+</ul>
+<p><strong>Por qué la ROM de entrada crece tanto:</strong> cada señal de estado duplica su tamaño. En la práctica muchas direcciones son &quot;no importa&quot;; por eso en el papel se escribe la tabla compacta con X, como en E1.</p>
+<hr>
+<h2>E5. EL PARCIAL: Realimentación N°2 resuelta completa</h2>
+<h3>Enunciado</h3>
+<p>El ASM parcial de la Figura 1 aproxima</p>
+<p>  <strong>Out = (y² + eˣ) / 4</strong></p>
+<p>con el algoritmo:</p>
+<pre><code> a = in1, b = in2, x = in3, y = in4, Final = 0   (espera Inicio)
+ t1 = x·x          (x²)
+ t2 = 1 + x
+ t3 = t1·x         (x³)
+ t4 = a·t1         (a·x²)
+ t5 = b·t3         (b·x³)
+ t6 = t2 + t4      (1 + x + a·x²)
+ t7 = t6 + t5      (1 + x + a·x² + b·x³)  ≈ eˣ
+ t8 = y·y          (y²)
+ t9 = t8 + t7      (y² + eˣ)
+ out = t9 &gt;&gt; 2, Final = 1                    (÷ 4)
+</code></pre>
+<p>Es la serie de Taylor eˣ ≈ 1 + x + x²/2 + x³/6, con <strong>a = 1/2</strong> y <strong>b = 1/6</strong> como coeficientes de entrada (en hardware se representan en punto fijo).</p>
+<p><strong>Recursos del CD:</strong> 1 sumador, 1 multiplicador, 1 desplazador de <strong>una</strong> posición a la derecha.</p>
+<p><strong>Piden:</strong> (1) el ASM respetando los recursos, (2) el CD con registros mínimos, (3) el diseño y especificación de la UC.</p>
+<h3>Qué pasó en tu solución (nota 3,4)</h3>
+<table>
+<thead>
+<tr>
+<th>Punto</th>
+<th>Marca del profesor</th>
+<th>Qué significa</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1. ASM</td>
+<td>−0,2, &quot;Hay opciones mejores a la planteada&quot;</td>
+<td>El ASM funciona pero usa más estados de los necesarios (ver abajo)</td>
+</tr>
+<tr>
+<td>Tabla de vida (1ª versión)</td>
+<td>&quot;Las variables deben mantenerse vivas&quot;</td>
+<td>En el primer intento las variables tenían huecos o terminaban antes de su último uso</td>
+</tr>
+<tr>
+<td>Tabla de vida (2ª versión)</td>
+<td>&quot;Corrección buena&quot;</td>
+<td>La segunda tabla es correcta: 6 registros</td>
+</tr>
+<tr>
+<td>2. CD</td>
+<td>−0,8, &quot;Incompleto&quot;</td>
+<td>Faltaban conexiones de las unidades, el desplazador, la salida y los selectores</td>
+</tr>
+<tr>
+<td>3. UC</td>
+<td>&quot;Falta describir transiciones y ROMs&quot;</td>
+<td>Diste tamaños, pero no el contenido de la ROM de entrada ni la de salida (ni la PC)</td>
+</tr>
+</tbody></table>
+<h3>Paso 1: el DFG (dependencias) y el análisis de recursos</h3>
+<pre><code>   x ──┬──► [×] t1 ──┬──► [×] t3 ──► [×] t5 ──┐
+       │   (x·x)     │   (t1·x)    (b·t3)     │
+       │             └──► [×] t4 ──┐          ▼
+       │                 (a·t1)    ▼        [+] t7 ──┐
+       └──► [+] t2 ───────────► [+] t6 ──►  (t6+t5)  ▼
+           (1+x)                (t2+t4)            [+] t9 ─► [&gt;&gt;1] ─► [&gt;&gt;1] ─► out
+   y ─────► [×] t8 ────────────────────────────────►(t8+t7)
+           (y·y)
+</code></pre>
+<ul>
+<li>Multiplicaciones: t1, t3, t4, t5, t8 = <strong>5</strong> → con 1 multiplicador hacen falta <strong>al menos 5 estados de cálculo</strong>.</li>
+<li>Sumas: t2, t6, t7, t9 = 4.</li>
+<li>Desplazamientos: 2 (÷4 con un desplazador de una posición = dos <code>&gt;&gt;1</code> seguidos, porque dependen uno del otro).</li>
+</ul>
+<p><strong>¿Cuántos estados de cálculo como mínimo?</strong> Después de la última multiplicación todavía hay que hacer cosas:</p>
+<ul>
+<li>Si la última es t5: faltan t7, t9, &gt;&gt;1, &gt;&gt;1 → 4 estados más → 9 en total.</li>
+<li>Si la última es t4: faltan t6, t7, t9, &gt;&gt;1, &gt;&gt;1 → 5 más → 10.</li>
+<li>Si la última es <strong>t8</strong>: faltan t9, &gt;&gt;1, &gt;&gt;1 → 3 más → <strong>8 en total</strong>.</li>
+</ul>
+<p>Así que el mínimo con estos recursos es <strong>8 estados de cálculo</strong>, con t8 como última multiplicación. Planificación RC (list scheduling):</p>
+<table>
+<thead>
+<tr>
+<th>Paso</th>
+<th>Multiplicador</th>
+<th>Sumador</th>
+<th>Desplazador</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>t1 = x·x</td>
+<td>t2 = 1 + x</td>
+<td>–</td>
+</tr>
+<tr>
+<td>2</td>
+<td>t3 = t1·x</td>
+<td>–</td>
+<td>–</td>
+</tr>
+<tr>
+<td>3</td>
+<td>t4 = a·t1</td>
+<td>–</td>
+<td>–</td>
+</tr>
+<tr>
+<td>4</td>
+<td>t5 = b·t3</td>
+<td>t6 = t2 + t4</td>
+<td>–</td>
+</tr>
+<tr>
+<td>5</td>
+<td>t8 = y·y</td>
+<td>t7 = t6 + t5</td>
+<td>–</td>
+</tr>
+<tr>
+<td>6</td>
+<td>–</td>
+<td>t9 = t8 + t7</td>
+<td>–</td>
+</tr>
+<tr>
+<td>7</td>
+<td>–</td>
+<td>–</td>
+<td>t9 = t9 &gt;&gt; 1</td>
+</tr>
+<tr>
+<td>8</td>
+<td>–</td>
+<td>–</td>
+<td>out = t9 &gt;&gt; 1</td>
+</tr>
+</tbody></table>
+<p>Tu planificación de cálculo era exactamente ésta: S2…S9 con las mismas operaciones. <strong>La parte de cálculo estaba bien.</strong> El −0,2 viene de los estados que sobran alrededor.</p>
+<h3>Paso 2: por qué &quot;hay opciones mejores&quot;</h3>
+<p>Tu ASM tenía 11 estados: S0 (Final=0, espera), S1 (carga a, b, x, y), S2–S9 (cálculo), S10 (out = t9, Final = 1). Dos mejoras:</p>
+<ol>
+<li><strong>Cargar las entradas en el estado de espera.</strong> Mira la Figura 1 del enunciado: la carga <code>a = in1 … y = in4, Final = 0</code> está <strong>en la misma caja</strong> que espera a Inicio. Mientras Inicio = 0, los registros se recargan en cada ciclo, y cuando llega Inicio = 1 ya tienen los datos. Te ahorras S1.</li>
+<li><strong>Sacar el resultado en el último desplazamiento.</strong> En vez de <code>S9: t9 = t9 &gt;&gt; 1</code> y <code>S10: out = t9</code>, el último estado lleva la salida del desplazador directamente al three-state: <code>out = t9 &gt;&gt; 1, Final = 1</code>. Es encadenar un desplazamiento con la salida (no hay que guardar nada). Te ahorras otro estado.</li>
+</ol>
+<p>Resultado: <strong>9 estados (S0–S8)</strong> en vez de 11.</p>
+<blockquote>
+<p>Alternativa si tu profesor prefiere que <code>out</code> salga de un registro: deja <code>S8: t9 = t9 &gt;&gt; 1</code> y <code>S9: out = t9, Final = 1</code>. Son 10 estados y sigue siendo mejor que 11.</p>
+</blockquote>
+<blockquote>
+<p>Observación extra (para defender en un examen): si el enunciado garantiza que in1…in4 se mantienen estables durante todo el cálculo, a, b, x, y podrían leerse <strong>directamente de los puertos</strong> sin registros. Entonces el máximo de variables vivas baja a 3. Con el enunciado tal cual (los datos se cargan en registros), se usan registros.</p>
+</blockquote>
+<h3>Paso 3: ASM corregido</h3>
+<pre><code>              ┌────────────────────────────────────┐
+     ┌───────►│ S0   Final = 0                     │◄──────────────────┐
+     │        │      a←in1  b←in2  x←in3  y←in4    │                   │
+     │        └─────────────────┬──────────────────┘                   │
+     │                          ▼                                      │
+     │      0              ◇  Inicio  ◇                                │
+     └─────────────────────────┤                                       │
+                               │ 1                                     │
+                               ▼                                       │
+                 ┌───────────────────────────┐                         │
+                 │ S1   t1 ← x·x ; t2 ← 1+x  │                         │
+                 └─────────────┬─────────────┘                         │
+                 ┌─────────────▼─────────────┐                         │
+                 │ S2   t3 ← t1·x            │                         │
+                 └─────────────┬─────────────┘                         │
+                 ┌─────────────▼─────────────┐                         │
+                 │ S3   t4 ← a·t1            │                         │
+                 └─────────────┬─────────────┘                         │
+                 ┌─────────────▼─────────────┐                         │
+                 │ S4   t5 ← b·t3 ; t6 ← t2+t4│                        │
+                 └─────────────┬─────────────┘                         │
+                 ┌─────────────▼─────────────┐                         │
+                 │ S5   t8 ← y·y ; t7 ← t6+t5│                         │
+                 └─────────────┬─────────────┘                         │
+                 ┌─────────────▼─────────────┐                         │
+                 │ S6   t9 ← t8 + t7         │                         │
+                 └─────────────┬─────────────┘                         │
+                 ┌─────────────▼─────────────┐                         │
+                 │ S7   t9 ← t9 &gt;&gt; 1         │                         │
+                 └─────────────┬─────────────┘                         │
+                 ┌─────────────▼─────────────┐                         │
+                 │ S8   out = t9 &gt;&gt; 1        │                         │
+                 │      Final = 1            │─────────────────────────┘
+                 └───────────────────────────┘
+</code></pre>
+<p>Especificaciones del ASM:</p>
+<ul>
+<li>Máquina <strong>Moore</strong> (no hay cajas de asignación condicional): 9 estados.</li>
+<li>Única decisión: Inicio (entrada externa). <strong>No hay señales de estado del CD.</strong></li>
+<li>En cada estado: como máximo 1 multiplicación, 1 suma y 1 desplazamiento ✓ (respeta los recursos).</li>
+</ul>
+<h3>Paso 4: tiempos de vida (estados S1…S8)</h3>
+<p>Regla: escrita en Sk → viva desde Sk+1 hasta su último uso, sin huecos.</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Se escribe en</th>
+<th>Se lee en</th>
+<th>S1</th>
+<th>S2</th>
+<th>S3</th>
+<th>S4</th>
+<th>S5</th>
+<th>S6</th>
+<th>S7</th>
+<th>S8</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>y</td>
+<td>S0</td>
+<td>S5</td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>b</td>
+<td>S0</td>
+<td>S4</td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>a</td>
+<td>S0</td>
+<td>S3</td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>x</td>
+<td>S0</td>
+<td>S1, S2</td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>t1</td>
+<td>S1</td>
+<td>S2, S3</td>
+<td></td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>t2</td>
+<td>S1</td>
+<td>S4</td>
+<td></td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>t3</td>
+<td>S2</td>
+<td>S4</td>
+<td></td>
+<td></td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>t4</td>
+<td>S3</td>
+<td>S4</td>
+<td></td>
+<td></td>
+<td></td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>t5</td>
+<td>S4</td>
+<td>S5</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>t6</td>
+<td>S4</td>
+<td>S5</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>t7</td>
+<td>S5</td>
+<td>S6</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td>X</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>t8</td>
+<td>S5</td>
+<td>S6</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td>X</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>t9</td>
+<td>S6</td>
+<td>S7, S8</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td>X</td>
+<td>X</td>
+</tr>
+<tr>
+<td><strong>Vivas</strong></td>
+<td></td>
+<td></td>
+<td><strong>4</strong></td>
+<td><strong>6</strong></td>
+<td><strong>6</strong></td>
+<td><strong>5</strong></td>
+<td><strong>3</strong></td>
+<td><strong>2</strong></td>
+<td><strong>1</strong></td>
+<td><strong>1</strong></td>
+</tr>
+</tbody></table>
+<p><strong>Máximo = 6 → 6 registros mínimos.</strong> Es tu &quot;Corrección buena&quot; (tus columnas 2…10 son estas mismas desplazadas un estado, porque tu ASM tenía el estado de carga aparte).</p>
+<p>Error típico de la primera versión: poner X solo en los estados donde la variable <strong>se usa</strong> (por ejemplo, y solo en S1 y S5). Así parece que caben en menos registros, pero y se perdería en S2–S4.</p>
+<h3>Paso 5: asignación de registros con <em>left-edge</em></h3>
+<p>Orden por inicio: y(1–5), b(1–4), a(1–3), x(1–2), t1(2–3), t2(2–4), t3(3–4), t4(4), t5(5), t6(5), t7(6), t8(6), t9(7–8).</p>
+<table>
+<thead>
+<tr>
+<th>Registro</th>
+<th>Construcción</th>
+<th>Variables</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>R1</td>
+<td>y(1–5) → primera con inicio &gt; 5: t7(6) → inicio &gt; 6: t9(7–8)</td>
+<td><strong>{y, t7, t9}</strong></td>
+</tr>
+<tr>
+<td>R2</td>
+<td>b(1–4) → inicio &gt; 4: t5(5) → inicio &gt; 5: t8(6)</td>
+<td><strong>{b, t5, t8}</strong></td>
+</tr>
+<tr>
+<td>R3</td>
+<td>a(1–3) → inicio &gt; 3: t4(4) → inicio &gt; 4: t6(5)</td>
+<td><strong>{a, t4, t6}</strong></td>
+</tr>
+<tr>
+<td>R4</td>
+<td>x(1–2) → inicio &gt; 2: t3(3–4) → ya no quedan con inicio &gt; 4</td>
+<td><strong>{x, t3}</strong></td>
+</tr>
+<tr>
+<td>R5</td>
+<td>t2(2–4)</td>
+<td><strong>{t2}</strong></td>
+</tr>
+<tr>
+<td>R6</td>
+<td>t1(2–3)</td>
+<td><strong>{t1}</strong></td>
+</tr>
+</tbody></table>
+<p>Coincide con tu asignación del parcial (R1 = {y, t7, t9}, R2 = {b, t5, t8}, R3 = {a, t4, t6}, R4 = {x, t3}, R5 = {t2}, R6 = {t1}). Fíjate en los casos &quot;justos&quot;: en S3 se lee a (último uso) y se escribe t4 en el mismo R3; en S5 se lee t5 de R2 y se escribe t8 en R2. Ambos son válidos.</p>
+<h3>Paso 6: transferencias entre registros (RTL) por estado</h3>
+<p>Sustituye cada variable por su registro:</p>
+<table>
+<thead>
+<tr>
+<th>Estado</th>
+<th>Operación</th>
+<th>Transferencia</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>S0</td>
+<td>carga</td>
+<td>R1 ← in4, R2 ← in2, R3 ← in1, R4 ← in3</td>
+</tr>
+<tr>
+<td>S1</td>
+<td>t1 = x·x ; t2 = 1 + x</td>
+<td>R6 ← R4 × R4 ; R5 ← 1 + R4</td>
+</tr>
+<tr>
+<td>S2</td>
+<td>t3 = t1·x</td>
+<td>R4 ← R4 × R6</td>
+</tr>
+<tr>
+<td>S3</td>
+<td>t4 = a·t1</td>
+<td>R3 ← R3 × R6</td>
+</tr>
+<tr>
+<td>S4</td>
+<td>t5 = b·t3 ; t6 = t2 + t4</td>
+<td>R2 ← R2 × R4 ; R3 ← R3 + R5</td>
+</tr>
+<tr>
+<td>S5</td>
+<td>t8 = y·y ; t7 = t6 + t5</td>
+<td>R2 ← R1 × R1 ; R1 ← R3 + R2</td>
+</tr>
+<tr>
+<td>S6</td>
+<td>t9 = t8 + t7</td>
+<td>R1 ← R1 + R2</td>
+</tr>
+<tr>
+<td>S7</td>
+<td>t9 = t9 &gt;&gt; 1</td>
+<td>R1 ← R1 &gt;&gt; 1</td>
+</tr>
+<tr>
+<td>S8</td>
+<td>out = t9 &gt;&gt; 1</td>
+<td>OUT = R1 &gt;&gt; 1 (three-state), Final = 1</td>
+</tr>
+</tbody></table>
+<p>Esta tabla es la que <strong>te permite dibujar el CD sin olvidar conexiones</strong>: cada flecha del CD corresponde a una celda de aquí.</p>
+<h3>Paso 7: fuentes de cada entrada (para dimensionar los MUX)</h3>
+<p>Se usa la conmutatividad para elegir qué operando va a cada entrada y minimizar las fuentes:</p>
+<table>
+<thead>
+<tr>
+<th>Entrada</th>
+<th>Fuentes (estado)</th>
+<th>Fuentes distintas</th>
+<th>MUX</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Multiplicador, entrada izquierda (ML)</td>
+<td>R4 (S1, S2), R3 (S3), R2 (S4), R1 (S5)</td>
+<td>4</td>
+<td>4:1 (2 bits)</td>
+</tr>
+<tr>
+<td>Multiplicador, entrada derecha (MR)</td>
+<td>R4 (S1, S4), R6 (S2, S3), R1 (S5)</td>
+<td>3</td>
+<td>4:1 o 3:1 (2 bits)</td>
+</tr>
+<tr>
+<td>Sumador, entrada izquierda (AL)</td>
+<td>R4 (S1), R3 (S4, S5), R1 (S6)</td>
+<td>3</td>
+<td>3:1 (2 bits)</td>
+</tr>
+<tr>
+<td>Sumador, entrada derecha (AR)</td>
+<td>constante 1 (S1), R5 (S4), R2 (S5, S6)</td>
+<td>3</td>
+<td>3:1 (2 bits)</td>
+</tr>
+<tr>
+<td>Desplazador</td>
+<td>R1 (S7, S8)</td>
+<td>1</td>
+<td>cable directo</td>
+</tr>
+<tr>
+<td>R1</td>
+<td>in4 (S0), ADD (S5, S6), SHR (S7)</td>
+<td>3</td>
+<td>3:1 (2 bits)</td>
+</tr>
+<tr>
+<td>R2</td>
+<td>in2 (S0), MUL (S4, S5)</td>
+<td>2</td>
+<td>2:1 (1 bit)</td>
+</tr>
+<tr>
+<td>R3</td>
+<td>in1 (S0), MUL (S3), ADD (S4)</td>
+<td>3</td>
+<td>3:1 (2 bits)</td>
+</tr>
+<tr>
+<td>R4</td>
+<td>in3 (S0), MUL (S2)</td>
+<td>2</td>
+<td>2:1 (1 bit)</td>
+</tr>
+<tr>
+<td>R5</td>
+<td>ADD (S1)</td>
+<td>1</td>
+<td>cable directo</td>
+</tr>
+<tr>
+<td>R6</td>
+<td>MUL (S1)</td>
+<td>1</td>
+<td>cable directo</td>
+</tr>
+<tr>
+<td>OUT</td>
+<td>SHR (S8)</td>
+<td>1</td>
+<td>three-state con <code>h</code></td>
+</tr>
+</tbody></table>
+<p>Elección de operandos usada: S1 ML=R4, MR=R4 · S2 ML=R4, MR=R6 · S3 ML=R3, MR=R6 · S4 ML=R2, MR=R4 · S5 ML=R1, MR=R1. Sumador: S1 AL=R4, AR=1 · S4 AL=R3, AR=R5 · S5 AL=R3, AR=R2 · S6 AL=R1, AR=R2.</p>
+<h3>Paso 8: camino de datos completo</h3>
+<pre><code> ── REGISTROS ───────────────────────────────────────────────────────────────────────
+
+    in4  ADD  SHR      in2  MUL      in1  MUL  ADD      in3  MUL       ADD      MUL
+     │    │    │        │    │        │    │    │        │    │         │        │
+    ┌┴────┴────┴┐      ┌┴────┴┐      ┌┴────┴────┴┐      ┌┴────┴┐        │        │
+ s1►│ MUX_R1    │  s2►│MUX_R2│   s3►│ MUX_R3    │  s4►│MUX_R4│        │        │
+    │ 00 01 10  │      │ 0  1 │      │ 00 01 10  │      │ 0  1 │        │        │
+    └─────┬─────┘      └──┬───┘      └─────┬─────┘      └──┬───┘        │        │
+       ┌──┴──┐         ┌──┴──┐          ┌──┴──┐         ┌──┴──┐     ┌──┴──┐  ┌──┴──┐
+ LD1──►│ R1  │  LD2───►│ R2  │   LD3───►│ R3  │  LD4───►│ R4  │LD5─►│ R5  │LD6►│ R6 │
+       │y t7 │         │b t5 │          │a t4 │         │x t3 │     │ t2  │  │ t1  │
+       │ t9  │         │ t8  │          │ t6  │         │     │     │     │  │     │
+       └──┬──┘         └──┬──┘          └──┬──┘         └──┬──┘     └──┬──┘  └──┬──┘
+          │R1             │R2              │R3             │R4          │R5      │R6
+          ▼               ▼                ▼               ▼            ▼        ▼
+      (todas las salidas van a los buses que alimentan los MUX de abajo)
+
+ ── UNIDADES FUNCIONALES ────────────────────────────────────────────────────────────
+
+    R1  R2  R3  R4        R1  R4  R6            R1  R3  R4       &quot;1&quot; R2  R5
+    │   │   │   │         │   │   │             │   │   │         │   │   │
+   ┌┴───┴───┴───┴┐       ┌┴───┴───┴┐           ┌┴───┴───┴┐       ┌┴───┴───┴┐
+ml►│   MUX_ML    │   mr►│ MUX_MR  │        al►│ MUX_AL  │   ar►│ MUX_AR  │
+   │ 00 01 10 11 │       │ 00 01 10│           │ 00 01 10│       │ 00 01 10│
+   └──────┬──────┘       └────┬────┘           └────┬────┘       └────┬────┘
+          └────────┐   ┌──────┘                     └───────┐  ┌──────┘
+                 ┌─┴───┴─┐                                ┌─┴──┴─┐
+                 │   ×   │──────► MUL                     │  +   │──────► ADD
+                 └───────┘  (a R2, R3, R4, R6)            └──────┘  (a R1, R3, R5)
+
+          R1 ──►┌───────┐──────► SHR (a R1)
+                │  &gt;&gt;1  │
+                └───────┘──────►──┤▷├──────► OUT
+                                    ▲
+                                    h
+</code></pre>
+<p>Lista de componentes (lo que faltaba en tu CD):</p>
+<ul>
+<li>6 registros de n bits con carga (LD1…LD6).</li>
+<li>1 multiplicador, 1 sumador, 1 desplazador &gt;&gt;1.</li>
+<li>MUX: R1 (3:1), R2 (2:1), R3 (3:1), R4 (2:1), ML (4:1), MR (3:1), AL (3:1), AR (3:1 con la constante 1).</li>
+<li>1 buffer three-state en la salida (h).</li>
+<li>0 señales de estado (no hay decisiones sobre datos).</li>
+</ul>
+<p>Ancho de palabra: n bits según el enunciado. Como a = 1/2 y b = 1/6, los datos van en <strong>punto fijo</strong>; el producto de dos números de n bits ocupa 2n bits y hay que reescalarlo (tomar los bits correctos). Basta con mencionarlo como especificación.</p>
+<h3>Paso 9: palabra de control</h3>
+<p>Campos (21 bits):</p>
+<table>
+<thead>
+<tr>
+<th>Campo</th>
+<th>Bits</th>
+<th>Codificación</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>s1 (MUX_R1)</td>
+<td>2</td>
+<td>00 = in4, 01 = ADD, 10 = SHR</td>
+</tr>
+<tr>
+<td>LD1</td>
+<td>1</td>
+<td>carga R1</td>
+</tr>
+<tr>
+<td>s2 (MUX_R2)</td>
+<td>1</td>
+<td>0 = in2, 1 = MUL</td>
+</tr>
+<tr>
+<td>LD2</td>
+<td>1</td>
+<td></td>
+</tr>
+<tr>
+<td>s3 (MUX_R3)</td>
+<td>2</td>
+<td>00 = in1, 01 = MUL, 10 = ADD</td>
+</tr>
+<tr>
+<td>LD3</td>
+<td>1</td>
+<td></td>
+</tr>
+<tr>
+<td>s4 (MUX_R4)</td>
+<td>1</td>
+<td>0 = in3, 1 = MUL</td>
+</tr>
+<tr>
+<td>LD4</td>
+<td>1</td>
+<td></td>
+</tr>
+<tr>
+<td>LD5</td>
+<td>1</td>
+<td></td>
+</tr>
+<tr>
+<td>LD6</td>
+<td>1</td>
+<td></td>
+</tr>
+<tr>
+<td>ml (MUX_ML)</td>
+<td>2</td>
+<td>00 = R1, 01 = R2, 10 = R3, 11 = R4</td>
+</tr>
+<tr>
+<td>mr (MUX_MR)</td>
+<td>2</td>
+<td>00 = R1, 01 = R4, 10 = R6</td>
+</tr>
+<tr>
+<td>al (MUX_AL)</td>
+<td>2</td>
+<td>00 = R1, 01 = R3, 10 = R4</td>
+</tr>
+<tr>
+<td>ar (MUX_AR)</td>
+<td>2</td>
+<td>00 = &quot;1&quot;, 01 = R2, 10 = R5</td>
+</tr>
+<tr>
+<td>h</td>
+<td>1</td>
+<td>habilita OUT</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td><strong>21</strong></td>
+<td>+ Final = 22 bits en la ROM de salida</td>
+</tr>
+</tbody></table>
+<p>Valores por estado:</p>
+<table>
+<thead>
+<tr>
+<th>Estado</th>
+<th>s1</th>
+<th>LD1</th>
+<th>s2</th>
+<th>LD2</th>
+<th>s3</th>
+<th>LD3</th>
+<th>s4</th>
+<th>LD4</th>
+<th>LD5</th>
+<th>LD6</th>
+<th>ml</th>
+<th>mr</th>
+<th>al</th>
+<th>ar</th>
+<th>h</th>
+<th>Final</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>S0</td>
+<td>00</td>
+<td>1</td>
+<td>0</td>
+<td>1</td>
+<td>00</td>
+<td>1</td>
+<td>0</td>
+<td>1</td>
+<td>0</td>
+<td>0</td>
+<td>XX</td>
+<td>XX</td>
+<td>XX</td>
+<td>XX</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>S1</td>
+<td>XX</td>
+<td>0</td>
+<td>X</td>
+<td>0</td>
+<td>XX</td>
+<td>0</td>
+<td>X</td>
+<td>0</td>
+<td>1</td>
+<td>1</td>
+<td>11</td>
+<td>01</td>
+<td>10</td>
+<td>00</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>S2</td>
+<td>XX</td>
+<td>0</td>
+<td>X</td>
+<td>0</td>
+<td>XX</td>
+<td>0</td>
+<td>1</td>
+<td>1</td>
+<td>0</td>
+<td>0</td>
+<td>11</td>
+<td>10</td>
+<td>XX</td>
+<td>XX</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>S3</td>
+<td>XX</td>
+<td>0</td>
+<td>X</td>
+<td>0</td>
+<td>01</td>
+<td>1</td>
+<td>X</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>10</td>
+<td>10</td>
+<td>XX</td>
+<td>XX</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>S4</td>
+<td>XX</td>
+<td>0</td>
+<td>1</td>
+<td>1</td>
+<td>10</td>
+<td>1</td>
+<td>X</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>01</td>
+<td>01</td>
+<td>01</td>
+<td>10</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>S5</td>
+<td>01</td>
+<td>1</td>
+<td>1</td>
+<td>1</td>
+<td>XX</td>
+<td>0</td>
+<td>X</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>00</td>
+<td>00</td>
+<td>01</td>
+<td>01</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>S6</td>
+<td>01</td>
+<td>1</td>
+<td>X</td>
+<td>0</td>
+<td>XX</td>
+<td>0</td>
+<td>X</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>XX</td>
+<td>XX</td>
+<td>00</td>
+<td>01</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>S7</td>
+<td>10</td>
+<td>1</td>
+<td>X</td>
+<td>0</td>
+<td>XX</td>
+<td>0</td>
+<td>X</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>XX</td>
+<td>XX</td>
+<td>XX</td>
+<td>XX</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>S8</td>
+<td>XX</td>
+<td>0</td>
+<td>X</td>
+<td>0</td>
+<td>XX</td>
+<td>0</td>
+<td>X</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>XX</td>
+<td>XX</td>
+<td>XX</td>
+<td>XX</td>
+<td>1</td>
+<td>1</td>
+</tr>
+</tbody></table>
+<p>Comprobación de un estado, S4: <code>t5 = b·t3</code> → ml = 01 (R2 = b), mr = 01 (R4 = t3), resultado MUL → R2 (s2 = 1, LD2 = 1). <code>t6 = t2 + t4</code> → al = 01 (R3 = t4), ar = 10 (R5 = t2), resultado ADD → R3 (s3 = 10, LD3 = 1). Los demás LD en 0 ✓.</p>
+<h3>Paso 10: caja negra y caja gris</h3>
+<pre><code> Caja negra:                                Caja gris:
+                                              Inicio                in1 in2 in3 in4
+ Inicio ─►┌────────────┐                        │                     │   │   │   │
+  in1 ─/n►│            │──► Final               ▼        PC           ▼   ▼   ▼   ▼
+  in2 ─/n►│  Ecuación  │                     ┌──────┐ ────/21────►  ┌──────────────┐
+  in3 ─/n►│            │──/n─► Out           │  UC  │               │      CD      │──/n─► Out
+  in4 ─/n►│            │                     └──────┘  (0 señales   └──────────────┘
+  CLK ───►│            │                       │  ▲ ▲   de estado)        ▲   ▲
+  RST ───►└────────────┘                     Final CLK RST               CLK RST
+</code></pre>
+<h3>Paso 11: unidad de control (lo que te faltó)</h3>
+<p><strong>Dimensionamiento:</strong></p>
+<ul>
+<li>9 estados → <strong>n = 4 bits</strong> (registro de 4 flip-flops D). Códigos S0 = 0000 … S8 = 1000; 1001–1111 no usados.</li>
+<li>Entradas de la UC: solo Inicio (c = 1). ROM de entrada: 2^(4+1) × 4 = <strong>32 × 4</strong>.</li>
+<li>ROM de salida (Moore): 2⁴ × (21 + 1) = <strong>16 × 22</strong>.</li>
+</ul>
+<pre><code>            ┌──────────────┐   D3..D0  ┌────────────┐  Q3..Q0   ┌──────────────┐
+ Inicio ───►│ ROM ENTRADA  │──────────►│ REGISTRO   │──────────►│ ROM SALIDA   │──/21─► PC
+        ┌──►│   32 × 4     │   4 bits  │  4 bits    │  4 bits   │   16 × 22    │──────► Final
+        │   └──────────────┘           └────────────┘    │      └──────────────┘
+        │                                 ▲     ▲        │
+        │                                CLK   RST       │
+        └──────────── Q3..Q0 (realimentación) ───────────┘
+</code></pre>
+<p><strong>Contenido de la ROM de entrada (tabla de transiciones):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Q3 Q2 Q1 Q0 (actual)</th>
+<th>Inicio</th>
+<th>D3 D2 D1 D0 (próximo)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>0000 (S0)</td>
+<td>0</td>
+<td>0000 (S0)</td>
+</tr>
+<tr>
+<td>0000 (S0)</td>
+<td>1</td>
+<td>0001 (S1)</td>
+</tr>
+<tr>
+<td>0001 (S1)</td>
+<td>X</td>
+<td>0010 (S2)</td>
+</tr>
+<tr>
+<td>0010 (S2)</td>
+<td>X</td>
+<td>0011 (S3)</td>
+</tr>
+<tr>
+<td>0011 (S3)</td>
+<td>X</td>
+<td>0100 (S4)</td>
+</tr>
+<tr>
+<td>0100 (S4)</td>
+<td>X</td>
+<td>0101 (S5)</td>
+</tr>
+<tr>
+<td>0101 (S5)</td>
+<td>X</td>
+<td>0110 (S6)</td>
+</tr>
+<tr>
+<td>0110 (S6)</td>
+<td>X</td>
+<td>0111 (S7)</td>
+</tr>
+<tr>
+<td>0111 (S7)</td>
+<td>X</td>
+<td>1000 (S8)</td>
+</tr>
+<tr>
+<td>1000 (S8)</td>
+<td>X</td>
+<td>0000 (S0)</td>
+</tr>
+<tr>
+<td>1001 … 1111</td>
+<td>X</td>
+<td>0000 (vuelta segura a S0)</td>
+</tr>
+</tbody></table>
+<p>Como la dirección tiene 5 bits, la ROM tiene 32 posiciones. Cada fila con &quot;X&quot; en Inicio ocupa dos posiciones con el mismo contenido.</p>
+<p><strong>Contenido de la ROM de salida:</strong> es la tabla del Paso 9 (una fila de 22 bits por estado). Las direcciones 1001–1111 se llenan con todos los LD = 0, h = 0, Final = 0 (no hacer nada).</p>
+<p><strong>Diagrama de estados equivalente:</strong></p>
+<pre><code>         Inicio=0
+          ┌──┐
+          ▼  │
+ RST ──► (S0) ──Inicio=1──► (S1) ─► (S2) ─► (S3) ─► (S4) ─► (S5) ─► (S6) ─► (S7) ─► (S8)
+          ▲                                                                           │
+          └───────────────────────────────────────────────────────────────────────────┘
+   Moore: en cada círculo va su PC; Final = 1 solo en S8.
+</code></pre>
+<p>Como casi todas las transiciones son &quot;pasar al siguiente&quot;, otra UC válida (y más barata) es <strong>un contador de 4 bits + decodificador</strong>: el contador se queda en 0 mientras Inicio = 0, cuenta en S1…S7 y se reinicia en S8. Puedes mencionarlo como alternativa.</p>
+<h3>Resumen de cómo debiste responder (lista de chequeo del parcial)</h3>
+<ol>
+<li>ASM con recursos: 1 multiplicación, 1 suma y 1 desplazamiento máximo por estado; carga en el estado de espera; ÷4 = dos <code>&gt;&gt;1</code>.</li>
+<li>Tabla de tiempos de vida <strong>sin huecos</strong> → máximo 6 → 6 registros.</li>
+<li><em>Left-edge</em> → R1…R6.</li>
+<li>Tabla RTL por estado (registro ← unidad(registro, registro)).</li>
+<li>Tabla de fuentes → MUX de cada entrada.</li>
+<li>CD dibujado con <strong>todas</strong> las unidades (incluido el desplazador y el three-state) y los nombres de las señales de control.</li>
+<li>Palabra de control: campos, bits y tabla por estado.</li>
+<li>UC: bits de estado, tamaños de ROM y <strong>contenido</strong> de las dos ROM.</li>
+</ol>
+<hr>
+<h2>E6. Problema 8.10: asignar t1…t8 al mínimo de registros con <em>left-edge</em></h2>
+<p>Tiempos de vida leídos de la Figura P8.10 (estados s0…s7):</p>
+<table>
+<thead>
+<tr>
+<th>Var</th>
+<th>s0</th>
+<th>s1</th>
+<th>s2</th>
+<th>s3</th>
+<th>s4</th>
+<th>s5</th>
+<th>s6</th>
+<th>s7</th>
+<th>Intervalo</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>t1</td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td>0–3</td>
+</tr>
+<tr>
+<td>t2</td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td>0–2</td>
+</tr>
+<tr>
+<td>t3</td>
+<td></td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+<td>1–4</td>
+</tr>
+<tr>
+<td>t4</td>
+<td></td>
+<td></td>
+<td></td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+<td>3–4</td>
+</tr>
+<tr>
+<td>t5</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td>4–6</td>
+</tr>
+<tr>
+<td>t6</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td>4–5</td>
+</tr>
+<tr>
+<td>t7</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td>5–6</td>
+</tr>
+<tr>
+<td>t8</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td>X</td>
+<td>X</td>
+<td>6–7</td>
+</tr>
+<tr>
+<td><strong>Vivas</strong></td>
+<td>2</td>
+<td>3</td>
+<td>3</td>
+<td>3</td>
+<td><strong>4</strong></td>
+<td>3</td>
+<td>3</td>
+<td>1</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>(Si en tu copia del libro t3 empieza en otra columna, el procedimiento es el mismo; solo cambia la tabla.)</p>
+<p><strong>Mínimo teórico: 4 registros</strong> (columna s4: t3, t4, t5, t6).</p>
+<p><em>Left-edge</em> con el orden t1(0–3), t2(0–2), t3(1–4), t4(3–4), t5(4–6), t6(4–5), t7(5–6), t8(6–7):</p>
+<table>
+<thead>
+<tr>
+<th>Registro</th>
+<th>Construcción</th>
+<th>Resultado</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>R1</td>
+<td>t1(0–3) → inicio &gt; 3: t5(4–6) → inicio &gt; 6: ninguna (t8 empieza en 6 y choca)</td>
+<td>{t1, t5}</td>
+</tr>
+<tr>
+<td>R2</td>
+<td>t2(0–2) → inicio &gt; 2: t4(3–4) → inicio &gt; 4: t7(5–6) → inicio &gt; 6: ninguna</td>
+<td>{t2, t4, t7}</td>
+</tr>
+<tr>
+<td>R3</td>
+<td>t3(1–4) → inicio &gt; 4: t8(6–7)</td>
+<td>{t3, t8}</td>
+</tr>
+<tr>
+<td>R4</td>
+<td>t6(4–5)</td>
+<td>{t6}</td>
+</tr>
+</tbody></table>
+<p>4 registros = densidad máxima → <strong>óptimo</strong> ✓.</p>
+<hr>
+<h2>E7. Problemas 8.20–8.22: planificación del lazo de la ecuación diferencial (8.7)</h2>
+<p>Cuerpo del lazo:</p>
+<pre><code> x1 = x + dx
+ u1 = u − 3·x·u·dx − 3·y·dx
+ y1 = y + u·dx
+ condición: x1 &lt; a
+</code></pre>
+<p><strong>Operaciones</strong> (reutilizando u·dx, que aparece dos veces):</p>
+<table>
+<thead>
+<tr>
+<th>Op</th>
+<th>Cálculo</th>
+<th>Tipo</th>
+<th>Depende de</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>m1</td>
+<td>3·x</td>
+<td>×</td>
+<td>–</td>
+</tr>
+<tr>
+<td>m2</td>
+<td>u·dx</td>
+<td>×</td>
+<td>–</td>
+</tr>
+<tr>
+<td>m3</td>
+<td>m1·m2 (3x·u·dx)</td>
+<td>×</td>
+<td>m1, m2</td>
+</tr>
+<tr>
+<td>m4</td>
+<td>3·y</td>
+<td>×</td>
+<td>–</td>
+</tr>
+<tr>
+<td>m5</td>
+<td>m4·dx (3y·dx)</td>
+<td>×</td>
+<td>m4</td>
+</tr>
+<tr>
+<td>s1</td>
+<td>u − m3</td>
+<td>−</td>
+<td>m3</td>
+</tr>
+<tr>
+<td>s2</td>
+<td>s1 − m5 (= u1)</td>
+<td>−</td>
+<td>s1, m5</td>
+</tr>
+<tr>
+<td>a1</td>
+<td>x + dx (= x1)</td>
+<td>+</td>
+<td>–</td>
+</tr>
+<tr>
+<td>a2</td>
+<td>y + m2 (= y1)</td>
+<td>+</td>
+<td>m2</td>
+</tr>
+<tr>
+<td>c</td>
+<td>x1 &lt; a</td>
+<td>comparación (resta)</td>
+<td>a1</td>
+</tr>
+</tbody></table>
+<p>(El ejemplo clásico de la literatura cuenta u·dx dos veces y tiene 6 multiplicaciones; si tu profesor lo plantea así, añade m6 = u·dx con las mismas ventanas que m2.)</p>
+<p><strong>8.20 (a) ASAP:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Paso</th>
+<th>Operaciones</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>m1, m2, m4, a1</td>
+</tr>
+<tr>
+<td>2</td>
+<td>m3, m5, a2, c</td>
+</tr>
+<tr>
+<td>3</td>
+<td>s1</td>
+</tr>
+<tr>
+<td>4</td>
+<td>s2</td>
+</tr>
+</tbody></table>
+<p>Camino crítico: m1/m2 → m3 → s1 → s2 = <strong>4 pasos</strong>.</p>
+<p><strong>8.20 (b) ALAP (con 4 pasos):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Paso</th>
+<th>Operaciones</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>m1, m2</td>
+</tr>
+<tr>
+<td>2</td>
+<td>m3, m4</td>
+</tr>
+<tr>
+<td>3</td>
+<td>s1, m5, a1</td>
+</tr>
+<tr>
+<td>4</td>
+<td>s2, a2, c</td>
+</tr>
+</tbody></table>
+<p><strong>Movilidad (ALAP − ASAP):</strong> m1 = 0, m2 = 0, m3 = 0, s1 = 0, s2 = 0 (camino crítico); m4 = 1, m5 = 1; a1 = 2, a2 = 2, c = 2.</p>
+<p><strong>8.21 Planificación TC (mínimos recursos para un número de estados dado)</strong> (ALU = sumador/restador que también compara):</p>
+<table>
+<thead>
+<tr>
+<th>Estados</th>
+<th>Planificación</th>
+<th>Recursos</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>4</td>
+<td>1: m1, m2, a1 · 2: m3, m4, c · 3: m5, s1 · 4: s2, a2</td>
+<td>2 ×, 2 ALU</td>
+</tr>
+<tr>
+<td>5</td>
+<td>1: m1, m2, a1 · 2: m3, m4, c · 3: m5, s1 · 4: s2 · 5: a2</td>
+<td>2 ×, 1 ALU</td>
+</tr>
+<tr>
+<td>6</td>
+<td>1: m1, a1 · 2: m2, c · 3: m3, a2 · 4: m4, s1 · 5: m5 · 6: s2</td>
+<td>1 ×, 1 ALU</td>
+</tr>
+</tbody></table>
+<p>Por qué 4 estados necesitan 2 ALU: hay 5 operaciones de ALU (a1, a2, c, s1, s2) y solo 4 pasos, así que algún paso lleva dos.
+Por qué 5 estados no alcanzan con 1 multiplicador: las 5 multiplicaciones ocuparían los pasos 1–5, y después de la última (m3 o m5) aún falta al menos una resta → 6 pasos.</p>
+<p><strong>8.22 Planificación RC (mínimos estados con recursos dados)</strong> con <em>list scheduling</em> por movilidad:</p>
+<table>
+<thead>
+<tr>
+<th>Recursos</th>
+<th>Planificación</th>
+<th>Estados</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>(a) 3 ×, 2 ALU</td>
+<td>1: m1, m2, m4, a1 · 2: m3, m5, a2, c · 3: s1 · 4: s2</td>
+<td>4</td>
+</tr>
+<tr>
+<td>(b) 2 ×, 2 ALU</td>
+<td>1: m1, m2, a1 · 2: m3, m4, c, a2 · 3: m5, s1 · 4: s2</td>
+<td>4</td>
+</tr>
+<tr>
+<td>(c) 2 ×, 1 ALU</td>
+<td>1: m1, m2, a1 · 2: m3, m4, c · 3: m5, s1 · 4: s2 · 5: a2</td>
+<td>5</td>
+</tr>
+</tbody></table>
+<p>En (c), en el paso 2 compiten c y a2 por la única ALU; se elige cualquiera (misma movilidad) y en el paso 3 gana s1 por tener movilidad 0. Con (a) sobra un multiplicador: (b) consigue lo mismo con menos hardware.</p>
+<hr>
+<h2>E8. Algoritmo SRA (aproximación de raíz cuadrada) y segmentación (8.15)</h2>
+<p>El ejemplo del libro aproxima √(a² + b²) ≈ máx(0,875·x + 0,5·y, x), con x = máx(|a|, |b|) e y = mín(|a|, |b|). Como 0,875·x = x − x/8:</p>
+<table>
+<thead>
+<tr>
+<th>Op</th>
+<th>Cálculo</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>o1</td>
+<td>t1 = |a|</td>
+</tr>
+<tr>
+<td>o2</td>
+<td>t2 = |b|</td>
+</tr>
+<tr>
+<td>o3</td>
+<td>x = máx(t1, t2)</td>
+</tr>
+<tr>
+<td>o4</td>
+<td>y = mín(t1, t2)</td>
+</tr>
+<tr>
+<td>o5</td>
+<td>t3 = x &gt;&gt; 3</td>
+</tr>
+<tr>
+<td>o6</td>
+<td>t4 = y &gt;&gt; 1</td>
+</tr>
+<tr>
+<td>o7</td>
+<td>t5 = x − t3</td>
+</tr>
+<tr>
+<td>o8</td>
+<td>t6 = t4 + t5</td>
+</tr>
+<tr>
+<td>o9</td>
+<td>t7 = máx(t6, x)</td>
+</tr>
+</tbody></table>
+<p><strong>ASAP:</strong> 1: o1, o2 · 2: o3, o4 · 3: o5, o6 · 4: o7 · 5: o8 · 6: o9 → 6 pasos.
+<strong>ALAP (6 pasos):</strong> 1: o1, o2 · 2: o3 · 3: o4, o5 · 4: o6, o7 · 5: o8 · 6: o9.
+Movilidad 1 para o4 y o6; las demás están en el camino crítico.</p>
+<p><strong>8.15 (a) Camino de datos segmentado en 3 etapas</strong> (dos pasos encadenados por etapa):</p>
+<pre><code>  a,b ─► [ |a| |b| ] ─► [máx][mín] ─║─► [&gt;&gt;3][&gt;&gt;1] ─► [ − ] ─║─► [ + ] ─► [máx] ─► SRA
+         └──────── Etapa 1 ────────┘ └─────── Etapa 2 ──────┘ └───── Etapa 3 ─────┘
+                                   reg: x, y              reg: x, t4, t5
+</code></pre>
+<ul>
+<li>Cada etapa encadena 2 operaciones → retardo ≈ 2τ (τ = retardo de una operación).</li>
+<li>Sin segmentar (FSMD de 6 estados, reloj τ): 6τ por resultado.</li>
+<li>Segmentado: un resultado cada 2τ (más el retardo del registro).</li>
+<li><strong>Ganancia para muchos datos ≈ 6τ / 2τ = 3.</strong> Latencia: 3 · 2τ = 6τ (igual o un poco peor).</li>
+<li>Para N datos: tiempo = (3 + N − 1) · 2τ. Con N = 100: 204τ frente a 600τ → 2,94.</li>
+</ul>
+<p><strong>8.15 (b) 4 etapas:</strong> el camino crítico tiene 6 operaciones en serie; repartidas en 4 etapas quedan, por ejemplo, 2-2-1-1. La etapa más lenta sigue durando 2τ, así que <strong>la ganancia sigue siendo ≈ 3</strong> y se gastan más registros y más latencia (4 · 2τ = 8τ). Solo mejoraría si las operaciones tuvieran retardos distintos y se pudiera balancear mejor. Ésta es la idea clave: <strong>la ganancia la fija la etapa más lenta.</strong></p>
+<p><strong>8.14 (unidades segmentadas), idea general:</strong> si la unidad [abs/mín/máx] tiene 2 etapas, el resultado de una operación lanzada en el paso i está listo en i + 2. En el ASM, las operaciones que dependen de ella se corren un paso, pero la unidad puede aceptar otra operación en i + 1. Se dibuja un diagrama de tiempos con una fila por etapa de cada unidad y se van colocando las operaciones.</p>
+<hr>
+<h2>E9. Problemas 8.4, 8.5 y 8.8: diagramas ASM</h2>
+<h3>8.4 Contador de décadas con salidas L5, E5, G5</h3>
+<p>Cuenta 0…9 cíclicamente. L5 = 1 si cuenta &lt; 5, E5 = 1 si cuenta = 5, G5 = 1 si cuenta &gt; 5.</p>
+<p>Versión basada en entradas (Mealy, 2 estados):</p>
+<pre><code> S0: cuenta ← 0 ─────────────────────────────► S1
+ S1: (caja vacía)
+       ◇ cuenta &lt; 5 ◇ ─1─► (L5 = 1)
+             │0
+       ◇ cuenta = 5 ◇ ─1─► (E5 = 1)
+             │0
+           (G5 = 1)
+       ── luego, en el mismo bloque ──
+       ◇ cuenta = 9 ◇ ─1─► (cuenta ← 0) ──► S1
+             │0
+       (cuenta ← cuenta + 1) ─────────────► S1
+</code></pre>
+<p>CD: registro de 4 bits, sumador +1, MUX (0 / cuenta+1), comparadores &lt;5, =5, =9.
+Versión Moore: 10 estados (uno por valor), con L5/E5/G5 escritos dentro de cada caja de estado. Es el ejemplo clásico de &quot;Moore: más estados, salidas solo del estado&quot;.</p>
+<h3>8.5 Contador módulo 4 (rango = 0) o módulo 7 (rango = 1)</h3>
+<pre><code> S0: cuenta ← 0 ──► S1
+ S1: salida = cuenta
+     ◇ rango ◇
+       0 │                       1 │
+     ◇ cuenta ≥ 3 ◇            ◇ cuenta ≥ 6 ◇
+      1│      │0                1│      │0
+  (cuenta←0) (cuenta←cuenta+1) (cuenta←0) (cuenta←cuenta+1)
+      └──────┴──────── ► S1 ◄──┴──────┘
+</code></pre>
+<p>Se usa <strong>≥</strong> en vez de = para que, si rango cambia de 1 a 0 con cuenta = 5, el contador vuelva a 0 y no se salga del rango.</p>
+<h3>8.8 Multiplicador de desplazamiento y suma</h3>
+<p>Multiplica MD × MR (n bits). PP es el producto parcial (parte alta), y MR se va desplazando y termina guardando la parte baja.</p>
+<pre><code> S0: Final = 0 ; MD ← inport1 ; MR ← inport2        ◇Inicio◇ ─0─► S0
+                                                         │1
+ S1: PP ← 0 ; cont ← n
+ S2: ◇ MR₀ ◇ ─1─► (PP ← PP + MD)                    [asignación condicional]
+          │0
+ S3: {C, PP, MR} ← {C, PP, MR} &gt;&gt; 1 ; cont ← cont − 1
+     ◇ cont = 0 ◇ ─0─► S2
+          │1
+ S4: salida = {PP, MR} ; Final = 1 ──► S0
+</code></pre>
+<p>Señales de estado: MR₀ (LSB del multiplicador) y (cont = 0).</p>
+<p>Traza 5 × 3 con 4 bits (MD = 0101, MR = 0011):</p>
+<table>
+<thead>
+<tr>
+<th>Iteración</th>
+<th>MR₀</th>
+<th>PP después de sumar</th>
+<th>Tras desplazar: PP, MR</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>inicio</td>
+<td></td>
+<td>0000</td>
+<td>0000, 0011</td>
+</tr>
+<tr>
+<td>1</td>
+<td>1</td>
+<td>0101</td>
+<td>0010, 1001</td>
+</tr>
+<tr>
+<td>2</td>
+<td>1</td>
+<td>0111</td>
+<td>0011, 1100</td>
+</tr>
+<tr>
+<td>3</td>
+<td>0</td>
+<td>0011</td>
+<td>0001, 0110</td>
+</tr>
+<tr>
+<td>4</td>
+<td>0</td>
+<td>0001</td>
+<td>0000, 1011</td>
+</tr>
+</tbody></table>
+<p>Resultado {PP, MR} = 0000 1111 = 15 ✓.</p>
+<hr>
+<h2>E10. Problema 8.11: partición del grafo de compatibilidad</h2>
+<p>No se puede resolver número por número sin leer bien los pesos de la Figura P8.11, pero el procedimiento que se evalúa es siempre el mismo:</p>
+<ol>
+<li>Lista todas las aristas con su peso. Si la arista tiene dos números (por ejemplo, 2/1), usa la regla que dé tu profesor; lo habitual es usar el primero como prioridad y el segundo para desempatar, o sumar ambos.</li>
+<li>Toma la arista de <strong>mayor peso</strong> y une sus nodos en un supernodo.</li>
+<li>Borra las aristas del supernodo hacia nodos que no sean compatibles con <strong>todos</strong> sus miembros (en la figura, las aristas punteadas suelen indicar incompatibilidad).</li>
+<li>Para los nodos que sí son compatibles con todos, la nueva arista pesa la <strong>suma</strong> de las aristas hacia cada miembro (lo dice el enunciado: &quot;el peso de un arco prioritario a un supernodo es igual a los pesos de los arcos a cada uno de los nodos del supernodo&quot;).</li>
+<li>Repite hasta que no queden aristas. Número de supernodos = número de recursos.</li>
+</ol>
+<p>Ejemplo resuelto con 4 nodos A, B, C, D y aristas de compatibilidad A–B (3), A–C (1), B–C (2), C–D (2), B–D (1). A y D son incompatibles (no hay arista A–D):</p>
+<ul>
+<li>Mayor peso A–B (3) → {A,B}. C es compatible con A y con B → arista {A,B}–C con peso 1 + 2 = 3. D no es compatible con A → se elimina la arista hacia D.</li>
+<li>Mayor peso {A,B}–C (3) → {A,B,C}. D no es compatible con A → no hay más aristas con D.</li>
+<li>Resultado: {A, B, C} y {D} → 2 recursos.</li>
+</ul>
+<hr>
+<h2>E11. Problema 8.16: control segmentado (diagrama de tiempos)</h2>
+<p>Con el contador de unos (estado del lazo: <code>Dato ← Dato &gt;&gt; 1</code> y decisión β = (Dato = 0)):</p>
+<p><strong>Sin registros de segmentación:</strong> en el ciclo k la UC está en el estado, el CD calcula y β llega a la UC en el mismo ciclo. La decisión se toma al final del ciclo k.</p>
+<p><strong>(a) Con registro de estado</strong> (β pasa por un flip-flop antes de llegar a la UC):</p>
+<table>
+<thead>
+<tr>
+<th>Ciclo</th>
+<th>k</th>
+<th>k+1</th>
+<th>k+2</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>UC</td>
+<td>S4 (Dato&gt;&gt;1)</td>
+<td>estado de espera</td>
+<td>decide con β</td>
+</tr>
+<tr>
+<td>CD</td>
+<td>calcula, β → registro</td>
+<td>β disponible</td>
+<td>–</td>
+</tr>
+</tbody></table>
+<p>La decisión llega un ciclo tarde: hay que meter un estado de espera o adelantar la operación que produce β.</p>
+<p><strong>(b) Con registro de control</strong> (la PC pasa por un registro antes de llegar al CD): la palabra de control de un estado se ejecuta en el ciclo <strong>siguiente</strong>. El CD va un ciclo detrás de la UC, y las decisiones que dependen de un resultado se retrasan también un ciclo.</p>
+<p><strong>(c) Con ambos:</strong> el lazo UC → CD → UC tarda dos ciclos más. El reloj puede ser más rápido (cada camino es más corto), pero cada decisión cuesta ciclos extra. Es el mismo compromiso de cualquier segmentación: más frecuencia a cambio de latencia.</p>
+<hr>
+<h1>PARTE III: PRÁCTICA Y REPASO</h1>
+<h2>Ejercicios propuestos (con respuesta)</h2>
+<p><strong>P1.</strong> Out = (a·b + c·d) &gt;&gt; 1 con 1 multiplicador, 1 sumador y 1 desplazador.</p>
+<details><summary>Respuesta</summary>
+
+<p>S0: Final = 0, carga a, b, c, d, espera Inicio · S1: t1 = a·b · S2: t2 = c·d · S3: t3 = t1 + t2 · S4: out = t3 &gt;&gt; 1, Final = 1. Vidas (S1–S4): a, b: S1; c, d: S1–S2; t1: S2–S3; t2: S3; t3: S4. Máximo = 4 (en S1: a, b, c, d) → 4 registros. <em>Left-edge</em>: R1 = {a, t1, t3}, R2 = {b, t2}, R3 = {c}, R4 = {d}. UC: 5 estados → 3 bits; ROM de entrada 2⁴ × 3 = 16 × 3.</p>
+</details>
+
+<p><strong>P2.</strong> Una UC tiene 13 estados, 3 señales de estado + Inicio, una PC de 17 bits y Final. Dimensiona la UC en versión Moore y en una versión Mealy donde la salida depende de 1 señal de estado.</p>
+<details><summary>Respuesta</summary>
+
+<p>n = 4 bits. ROM de entrada: 2^(4+4) × 4 = 256 × 4. ROM de salida Moore: 2⁴ × 18 = 16 × 18. ROM de salida Mealy: 2^(4+1) × 18 = 32 × 18.</p>
+</details>
+
+<p><strong>P3.</strong> Pipeline de 5 etapas con retardos 10, 8, 12, 9 y 11 ns y registros de 1 ns. Calcula periodo, latencia, ganancia para 100 datos y ganancia asintótica.</p>
+<details><summary>Respuesta</summary>
+
+<p>Sin segmentar: 50 + 1 = 51 ns por dato. Periodo segmentado: 12 + 1 = 13 ns. Latencia: 5 · 13 = 65 ns. 100 datos: (5 + 99) · 13 = 1352 ns frente a 5100 ns → ganancia 3,77. Asintótica: 51 / 13 ≈ 3,92 (menor que 5 por el desbalance de etapas).</p>
+</details>
+
+<p><strong>P4.</strong> f = Σ xᵢ² para 8 datos usando solo un sumador (cuadrado por sumas sucesivas). Plantea el pseudoalgoritmo y las señales de estado.</p>
+<details><summary>Respuesta</summary>
+
+<pre><code>Final = 0 ; espera Inicio
+suma = 0 ; i = 0
+mientras i &lt; 8:
+   d = X[i] ; acc = 0 ; cont = d
+   mientras cont &gt; 0:  acc = acc + d ; cont = cont − 1
+   suma = suma + acc ; i = i + 1
+out = suma ; Final = 1
+</code></pre>
+<p>Señales de estado: (cont = 0) y (i = 8). Si los datos son con signo, primero d = |X[i]| (como en el Taller 6).</p>
+</details>
+
+<p><strong>P5.</strong> Con estos tiempos de vida en S1–S5, ¿cuántos registros hacen falta y cuál es la asignación? p: 1–2, q: 1–4, r: 2–3, s: 3–5, t: 4–5, u: 5.</p>
+<details><summary>Respuesta</summary>
+
+<p>Vivas por estado: S1 = 2, S2 = 3, S3 = 3, S4 = 3, S5 = 3 → 3 registros. <em>Left-edge</em> (orden p, q, r, s, t, u): R1 = {p, s} (s empieza en 3 &gt; 2), R2 = {q, u} (u empieza en 5 &gt; 4), R3 = {r, t} (t empieza en 4 &gt; 3).</p>
+</details>
+
+<p><strong>P6.</strong> ¿Por qué en un ASM no se puede escribir <code>t1 = x·x ; t3 = t1·x</code> en el mismo estado sin encadenamiento?</p>
+<details><summary>Respuesta</summary>
+
+<p>Porque t1 se guarda al final del estado; durante el estado, t3 leería el t1 viejo. Para hacerlo en un estado haría falta encadenar dos multiplicadores (y en el parcial solo hay uno).</p>
+</details>
+
+<h2>Errores frecuentes (y cómo evitarlos)</h2>
+<ol>
+<li><strong>Huecos en los tiempos de vida.</strong> Una variable ocupa registro desde que nace hasta su último uso, aunque no se use en medio.</li>
+<li><strong>Usar más unidades por estado de las disponibles.</strong> Revisa cada caja de estado: cuenta multiplicaciones, sumas y desplazamientos.</li>
+<li><strong>Dividir entre 4 con un desplazador de una posición en un solo estado.</strong> Son dos <code>&gt;&gt;1</code> dependientes → dos estados (o dos desplazadores en cascada).</li>
+<li><strong>CD sin entradas de las unidades.</strong> Cada unidad funcional necesita sus dos entradas conectadas, con MUX si hay varias fuentes. Haz siempre la tabla RTL y la tabla de fuentes antes de dibujar.</li>
+<li><strong>Olvidar el buffer de salida, el desplazador o las constantes</strong> (el &quot;1&quot; de <code>1 + x</code>).</li>
+<li><strong>Poner X en un habilitador de escritura.</strong> LD y wr van en 0 cuando el registro no debe cambiar.</li>
+<li><strong>Dar solo el tamaño de las ROM.</strong> Hay que dar la tabla de transiciones (ROM de entrada) y la tabla de palabras de control (ROM de salida).</li>
+<li><strong>Contar mal la dirección de la ROM de entrada.</strong> Bits de estado + todas las entradas de la UC (Inicio, señales de estado, otras entradas externas).</li>
+<li><strong>Confundir Moore y Mealy.</strong> Si hay cajas de asignación condicional, es Mealy y la ROM de salida también recibe las condiciones.</li>
+<li><strong>Estados de más.</strong> Cargar los datos en el estado de espera y sacar el resultado en el último estado de cálculo, cuando el enunciado lo permite.</li>
+<li><strong>Bucles de decisión a decisión.</strong> Toda espera vuelve a una caja de estado.</li>
+</ol>
+<h2>Hoja de fórmulas</h2>
+<table>
+<thead>
+<tr>
+<th>Concepto</th>
+<th>Fórmula</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Bits de estado</td>
+<td>n = ⌈log₂ E⌉</td>
+</tr>
+<tr>
+<td>ROM de entrada</td>
+<td>2^(n + c) × n</td>
+</tr>
+<tr>
+<td>ROM de salida Moore</td>
+<td>2ⁿ × (k + f)</td>
+</tr>
+<tr>
+<td>ROM de salida Mealy</td>
+<td>2^(n + c&#39;) × (k + f)</td>
+</tr>
+<tr>
+<td>Bits de selección de un MUX de N entradas</td>
+<td>⌈log₂ N⌉</td>
+</tr>
+<tr>
+<td>Bits de un banco de 2^r registros</td>
+<td>wr + dirw(r) + enA + dirA(r) + enB + dirB(r) = 3 + 3r</td>
+</tr>
+<tr>
+<td>Registros mínimos</td>
+<td>máx. variables vivas en un estado</td>
+</tr>
+<tr>
+<td>Unidades mínimas de un tipo</td>
+<td>máx. operaciones de ese tipo en un estado</td>
+</tr>
+<tr>
+<td>Estados mínimos (sin límite de recursos)</td>
+<td>longitud del camino crítico (ASAP)</td>
+</tr>
+<tr>
+<td>Cota inferior con R unidades y M operaciones de un tipo</td>
+<td>⌈M / R⌉ estados</td>
+</tr>
+<tr>
+<td>Movilidad</td>
+<td>ALAP − ASAP</td>
+</tr>
+<tr>
+<td>Periodo segmentado</td>
+<td>T = t_etapa_máx + t_reg</td>
+</tr>
+<tr>
+<td>Tiempo para N datos en k etapas</td>
+<td>(k + N − 1) · T</td>
+</tr>
+<tr>
+<td>Ganancia</td>
+<td>N · t_total / ((k + N − 1) · T) → t_total / T</td>
+</tr>
+<tr>
+<td>Frecuencia máxima</td>
+<td>f = 1 / T_crítico</td>
+</tr>
+</tbody></table>
+<hr>
+<p><em>Fin de la guía. Orden recomendado de estudio: secciones 1–9 → E1, E2, E3 → secciones 10–11 → <strong>E5 (parcial)</strong> → E6, E7 → secciones 12–14 → E8, E11 → Parte III.</em></p>
+</body></html>
