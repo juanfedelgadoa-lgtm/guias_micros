@@ -1,0 +1,1114 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Parcial 2 - Sintesis y segmentacion resuelto</title><style>body{font-family:Segoe UI,Arial,sans-serif;max-width:1000px;margin:auto;padding:24px;line-height:1.55;color:#222}
+pre{background:#f4f4f4;padding:12px;overflow-x:auto;font-size:12.5px;line-height:1.25;border-radius:6px}
+code{font-family:Consolas,'DejaVu Sans Mono',monospace}
+table{border-collapse:collapse;margin:10px 0;font-size:14px}th,td{border:1px solid #bbb;padding:4px 8px}th{background:#e8eef7}
+h1{border-bottom:3px solid #345;padding-bottom:4px}h2{border-bottom:1px solid #aaa;margin-top:40px}
+blockquote{border-left:4px solid #6a8;margin:0;padding:4px 12px;background:#f3faf5}</style></head><body><h1>Parcial 2 (Realimentación N°2) — Síntesis y segmentación, paso a paso</h1>
+<h3>Out = (y² + eˣ) / 4, con 1 sumador, 1 multiplicador y 1 desplazador &gt;&gt;1</h3>
+<blockquote>
+<p>Se resuelve con <strong>los mismos métodos de tus apuntes</strong>: agrupación de variables (lado izquierdo), agrupación de operadores (partición de grafos), agrupación de conexiones (buses, partición de grafos) y las dos segmentaciones (unidad funcional y camino de datos). Sin código, solo diseño.</p>
+</blockquote>
+<hr>
+<h2>Índice</h2>
+<ol start="0">
+<li>Recordatorio del ASM y notación</li>
+<li>Grafo de flujo de datos (DFG) — la base de todo</li>
+<li>Agrupación de variables → registros mínimos (lado izquierdo)</li>
+<li>Agrupación de operadores → unidades funcionales (grafos)</li>
+<li>Camino de datos con variables y operadores agrupados</li>
+<li>Agrupación de conexiones → buses (grafos)</li>
+<li>Camino de datos final con buses</li>
+<li>Modelo de retardos (para medir las segmentaciones)</li>
+<li>Segmentación de la unidad funcional (el multiplicador en 2 etapas)</li>
+<li>Segmentación del camino de datos (pipeline completo)</li>
+<li>Resultado final y comparación</li>
+</ol>
+<hr>
+<h2>0. Recordatorio del ASM y notación</h2>
+<p>El algoritmo del enunciado (serie de Taylor de eˣ con a = coef. de x², b = coef. de x³):</p>
+<pre><code> S0: a=in1, b=in2, x=in3, y=in4, Final=0   (espera Inicio)
+ S1: t1 = x·x          t2 = 1 + x
+ S2: t3 = t1·x
+ S3: t4 = a·t1
+ S4: t5 = b·t3         t6 = t2 + t4
+ S5: t8 = y·y          t7 = t6 + t5
+ S6: t9 = t8 + t7
+ S7: t9 = t9 &gt;&gt; 1
+ S8: out = t9 &gt;&gt; 1, Final = 1
+</code></pre>
+<p>9 estados (S0–S8), Moore, sin señales de estado. La &quot;÷4&quot; son dos <code>&gt;&gt;1</code> seguidos porque el desplazador es de una posición. Esta planificación respeta el recurso: <strong>1 multiplicación, 1 suma y 1 desplazamiento como máximo por estado</strong>.</p>
+<p>Operaciones del algoritmo:</p>
+<table>
+<thead>
+<tr>
+<th>Multiplicaciones (×)</th>
+<th>Sumas (+)</th>
+<th>Desplazamientos (&gt;&gt;1)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>t1=x·x (S1), t3=t1·x (S2), t4=a·t1 (S3), t5=b·t3 (S4), t8=y·y (S5)</td>
+<td>t2=1+x (S1), t6=t2+t4 (S4), t7=t6+t5 (S5), t9=t8+t7 (S6)</td>
+<td>S7, S8</td>
+</tr>
+<tr>
+<td><strong>5 multiplicaciones</strong></td>
+<td><strong>4 sumas</strong></td>
+<td><strong>2 desplazamientos</strong></td>
+</tr>
+</tbody></table>
+<hr>
+<h2>1. Grafo de flujo de datos (DFG)</h2>
+<pre><code>    x ──┬──►[× t1]──┬──►[× t3]──►[× t5]──┐
+        │  (x·x)    │  (t1·x)   (b·t3)   │
+        │           └──►[× t4]──┐        ▼
+        │               (a·t1)  ▼      [+ t7]──┐
+   &quot;1&quot;──┴──►[+ t2]──────────►[+ t6]──►(t6+t5)  ▼
+            (1+x)            (t2+t4)         [+ t9]──►[&gt;&gt;1]──►[&gt;&gt;1]──► out
+    y ──────►[× t8]───────────────────────►(t8+t7)
+            (y·y)
+</code></pre>
+<p>El camino más largo (crítico) es: x·x → t1·x → b·t3 → t7 → t9 → &gt;&gt;1 → &gt;&gt;1. Esto fija el mínimo de estados.</p>
+<hr>
+<h2>2. Agrupación de variables → registros mínimos (lado izquierdo)</h2>
+<h3>2.1 Definiciones (tus apuntes)</h3>
+<ul>
+<li>Estado de <strong>escritura</strong> de una variable = el estado <strong>siguiente</strong> a aquel en que se calcula.</li>
+<li>Estado de <strong>lectura</strong> = donde se usa.</li>
+<li><strong>Tiempo de vida</strong> = desde el primer estado de escritura hasta el último de lectura, <strong>sin huecos</strong>.</li>
+</ul>
+<h3>2.2 Tabla de tiempos de vida (estados S1–S8)</h3>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>escrita en</th>
+<th>leída en</th>
+<th>S1</th>
+<th>S2</th>
+<th>S3</th>
+<th>S4</th>
+<th>S5</th>
+<th>S6</th>
+<th>S7</th>
+<th>S8</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>y</td>
+<td>S0</td>
+<td>S5</td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>b</td>
+<td>S0</td>
+<td>S4</td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>a</td>
+<td>S0</td>
+<td>S3</td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>x</td>
+<td>S0</td>
+<td>S1,S2</td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>t1</td>
+<td>S1</td>
+<td>S2,S3</td>
+<td></td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>t2</td>
+<td>S1</td>
+<td>S4</td>
+<td></td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>t3</td>
+<td>S2</td>
+<td>S4</td>
+<td></td>
+<td></td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>t4</td>
+<td>S3</td>
+<td>S4</td>
+<td></td>
+<td></td>
+<td></td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>t5</td>
+<td>S4</td>
+<td>S5</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>t6</td>
+<td>S4</td>
+<td>S5</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>t7</td>
+<td>S5</td>
+<td>S6</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td>X</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>t8</td>
+<td>S5</td>
+<td>S6</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td>X</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>t9</td>
+<td>S6</td>
+<td>S7,S8</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td>X</td>
+<td>X</td>
+</tr>
+<tr>
+<td><strong>Vivas</strong></td>
+<td></td>
+<td></td>
+<td><strong>4</strong></td>
+<td><strong>6</strong></td>
+<td><strong>6</strong></td>
+<td><strong>5</strong></td>
+<td><strong>3</strong></td>
+<td><strong>2</strong></td>
+<td><strong>1</strong></td>
+<td><strong>1</strong></td>
+</tr>
+</tbody></table>
+<p><strong>Máximo = 6 → 6 registros.</strong> (Es la &quot;corrección buena&quot; de tu parcial.)</p>
+<h3>2.3 Lado izquierdo</h3>
+<p>Orden por estado de inicio: y(1–5), b(1–4), a(1–3), x(1–2), t1(2–3), t2(2–4), t3(3–4), t4(4), t5(5), t6(5), t7(6), t8(6), t9(7–8).</p>
+<table>
+<thead>
+<tr>
+<th>Registro</th>
+<th>Se construye así</th>
+<th>Variables</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>R1</td>
+<td>y(1–5) → t7(6) → t9(7–8)</td>
+<td><strong>{y, t7, t9}</strong></td>
+</tr>
+<tr>
+<td>R2</td>
+<td>b(1–4) → t5(5) → t8(6)</td>
+<td><strong>{b, t5, t8}</strong></td>
+</tr>
+<tr>
+<td>R3</td>
+<td>a(1–3) → t4(4) → t6(5)</td>
+<td><strong>{a, t4, t6}</strong></td>
+</tr>
+<tr>
+<td>R4</td>
+<td>x(1–2) → t3(3–4)</td>
+<td><strong>{x, t3}</strong></td>
+</tr>
+<tr>
+<td>R5</td>
+<td>t2(2–4)</td>
+<td><strong>{t2}</strong></td>
+</tr>
+<tr>
+<td>R6</td>
+<td>t1(2–3)</td>
+<td><strong>{t1}</strong></td>
+</tr>
+</tbody></table>
+<p><strong>6 registros = densidad máxima → óptimo.</strong></p>
+<h3>2.4 Transferencias por estado (sustituyendo variable → registro)</h3>
+<table>
+<thead>
+<tr>
+<th>Estado</th>
+<th>Operación</th>
+<th>Transferencia RTL</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>S0</td>
+<td>carga</td>
+<td>R1←in4, R2←in2, R3←in1, R4←in3</td>
+</tr>
+<tr>
+<td>S1</td>
+<td>t1=x·x ; t2=1+x</td>
+<td>R6←R4×R4 ; R5←1+R4</td>
+</tr>
+<tr>
+<td>S2</td>
+<td>t3=t1·x</td>
+<td>R4←R4×R6</td>
+</tr>
+<tr>
+<td>S3</td>
+<td>t4=a·t1</td>
+<td>R3←R3×R6</td>
+</tr>
+<tr>
+<td>S4</td>
+<td>t5=b·t3 ; t6=t2+t4</td>
+<td>R2←R2×R4 ; R3←R3+R5</td>
+</tr>
+<tr>
+<td>S5</td>
+<td>t8=y·y ; t7=t6+t5</td>
+<td>R2←R1×R1 ; R1←R3+R2</td>
+</tr>
+<tr>
+<td>S6</td>
+<td>t9=t8+t7</td>
+<td>R1←R1+R2</td>
+</tr>
+<tr>
+<td>S7</td>
+<td>t9=t9&gt;&gt;1</td>
+<td>R1←R1&gt;&gt;1</td>
+</tr>
+<tr>
+<td>S8</td>
+<td>out=t9&gt;&gt;1,Final=1</td>
+<td>OUT=R1&gt;&gt;1</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>3. Agrupación de operadores → unidades funcionales (grafos)</h2>
+<p>Aquí los recursos ya están dados por el enunciado: <strong>1 sumador, 1 multiplicador, 1 desplazador</strong>. Pero el ejercicio sirve para ver el método completo, porque hay que comprobar que con <strong>una sola unidad de cada tipo basta</strong> y asignar cada operación a su unidad.</p>
+<h3>3.1 Paso 1: nodos (una operación por nodo)</h3>
+<pre><code> Multiplicaciones:  M1=x·x   M2=t1·x   M3=a·t1   M4=b·t3   M5=y·y
+ Sumas:             A1=1+x   A2=t2+t4  A3=t6+t5  A4=t8+t7
+ Desplazamientos:   D1=(&gt;&gt;1 en S7)   D2=(&gt;&gt;1 en S8)
+</code></pre>
+<h3>3.2 Paso 2: arcos de incompatibilidad (mismo estado)</h3>
+<p>Dos operaciones del mismo tipo son <strong>incompatibles</strong> (no comparten unidad) si están en el mismo estado:</p>
+<table>
+<thead>
+<tr>
+<th>Par</th>
+<th>Estado común</th>
+<th>¿Incompatible?</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>M1 y A1</td>
+<td>S1</td>
+<td>distinto tipo (× vs +), no compiten</td>
+</tr>
+<tr>
+<td>M4 y A2</td>
+<td>S4</td>
+<td>distinto tipo, no compiten</td>
+</tr>
+<tr>
+<td>M5 y A3</td>
+<td>S5</td>
+<td>distinto tipo, no compiten</td>
+</tr>
+<tr>
+<td>cualquier M con cualquier M</td>
+<td>—</td>
+<td><strong>nunca coinciden</strong> (1 × por estado)</td>
+</tr>
+<tr>
+<td>cualquier A con cualquier A</td>
+<td>—</td>
+<td><strong>nunca coinciden</strong> (1 + por estado)</td>
+</tr>
+<tr>
+<td>D1 y D2</td>
+<td>S7, S8</td>
+<td>están en estados distintos → compatibles</td>
+</tr>
+</tbody></table>
+<p><strong>Resultado del grafo:</strong> las 5 multiplicaciones son todas compatibles entre sí (ninguna comparte estado) → caben en <strong>1 multiplicador</strong>. Las 4 sumas son todas compatibles → <strong>1 sumador</strong>. Los 2 desplazamientos son compatibles → <strong>1 desplazador</strong>.</p>
+<pre><code> GRAFO DE MULTIPLICACIONES (todos compatibles → 1 clique → 1 unidad)
+
+     M1 ───── M2
+      │  \  /  │
+      │   \/   │        no hay ningún arco de incompatibilidad
+      │   /\   │        (ninguna comparte estado)
+     M5 ───── M3
+        \     /
+          M4
+
+ → Supernodo {M1,M2,M3,M4,M5} = MULTIPLICADOR
+
+ GRAFO DE SUMAS:  {A1,A2,A3,A4} → 1 clique → SUMADOR
+ GRAFO DE DESPL.: {D1,D2}       → 1 clique → DESPLAZADOR
+</code></pre>
+<p>Esto <strong>confirma</strong> que los recursos del enunciado (1 ×, 1 +, 1 &gt;&gt;) son suficientes. El mínimo coincide con &quot;máximo de operaciones del mismo tipo en un estado&quot; = 1 para cada tipo.</p>
+<h3>3.3 Paso 3: pesos fuente/destino (para decidir operandos y reducir MUX)</h3>
+<p>Aunque solo haya una unidad de cada tipo, los pesos sirven para elegir <strong>qué operando va a cada entrada</strong> y así reducir los multiplexores. Para cada entrada de cada unidad, listamos de qué registro lee en cada estado:</p>
+<p><strong>Multiplicador</strong> (se elige el orden de operandos aprovechando que a·b = b·a):</p>
+<table>
+<thead>
+<tr>
+<th>Entrada</th>
+<th>Lee en cada estado</th>
+<th>Fuentes distintas</th>
+<th>MUX</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>× izq (ML)</td>
+<td>R4(S1), R4(S2), R3(S3), R2(S4), R1(S5)</td>
+<td>R4, R3, R2, R1 = 4</td>
+<td>4:1</td>
+</tr>
+<tr>
+<td>× der (MR)</td>
+<td>R4(S1), R6(S2), R6(S3), R4(S4), R1(S5)</td>
+<td>R4, R6, R1 = 3</td>
+<td>3:1</td>
+</tr>
+</tbody></table>
+<p><strong>Sumador:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Entrada</th>
+<th>Lee en cada estado</th>
+<th>Fuentes distintas</th>
+<th>MUX</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>+ izq (AL)</td>
+<td>R4(S1), R3(S4), R3(S5), R1(S6)</td>
+<td>R4, R3, R1 = 3</td>
+<td>3:1</td>
+</tr>
+<tr>
+<td>+ der (AR)</td>
+<td>&quot;1&quot;(S1), R5(S4), R2(S5), R2(S6)</td>
+<td>&quot;1&quot;, R5, R2 = 3</td>
+<td>3:1</td>
+</tr>
+</tbody></table>
+<p><strong>Desplazador:</strong> siempre lee R1 → cable directo, sin MUX.</p>
+<h3>3.4 Destinos (MUX a la entrada de cada registro)</h3>
+<table>
+<thead>
+<tr>
+<th>Registro</th>
+<th>Recibe de (estado)</th>
+<th>Fuentes</th>
+<th>MUX</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>R1</td>
+<td>in4(S0), ADD(S5), ADD(S6), SHR(S7)</td>
+<td>in4, ADD, SHR = 3</td>
+<td>3:1</td>
+</tr>
+<tr>
+<td>R2</td>
+<td>in2(S0), MUL(S4), MUL(S5)</td>
+<td>in2, MUL = 2</td>
+<td>2:1</td>
+</tr>
+<tr>
+<td>R3</td>
+<td>in1(S0), MUL(S3), ADD(S4)</td>
+<td>in1, MUL, ADD = 3</td>
+<td>3:1</td>
+</tr>
+<tr>
+<td>R4</td>
+<td>in3(S0), MUL(S2)</td>
+<td>in3, MUL = 2</td>
+<td>2:1</td>
+</tr>
+<tr>
+<td>R5</td>
+<td>ADD(S1)</td>
+<td>ADD = 1</td>
+<td>directo</td>
+</tr>
+<tr>
+<td>R6</td>
+<td>MUL(S1)</td>
+<td>MUL = 1</td>
+<td>directo</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>4. Camino de datos con variables y operadores agrupados</h2>
+<pre><code>   in4 ADD SHR     in2 MUL      in1 MUL ADD      in3 MUL      ADD       MUL
+    │   │   │       │   │        │   │   │        │   │        │         │
+   ┌┴───┴───┴┐     ┌┴───┴┐      ┌┴───┴───┴┐      ┌┴───┴┐    ┌──┴─┐   ┌───┴┐
+ s1│ MUX R1  │  s2 │MUXR2│   s3 │ MUX R3  │  s4  │MUXR4│    │ R5 │   │ R6 │
+   │00 01 10 │     │0  1 │      │00 01 10 │      │0  1 │    │(t2)│   │(t1)│
+   └────┬────┘     └──┬──┘      └────┬────┘      └──┬──┘    └──┬─┘   └──┬─┘
+     ┌──┴─┐        ┌──┴─┐        ┌───┴┐          ┌──┴─┐       │        │
+     │ R1 │        │ R2 │        │ R3 │          │ R4 │       │        │
+     │y,t7│        │b,t5│        │a,t4│          │x,t3│       │        │
+     │ t9 │        │ t8 │        │ t6 │          │    │       │        │
+     └──┬─┘        └──┬─┘        └──┬─┘          └──┬─┘       │        │
+        └─────┬───────┴──────┬──────┴───────┬───────┴─────────┴────────┘
+              ▼              ▼               ▼          (buses de lectura R1..R6, &quot;1&quot;)
+        ┌───────────┐   ┌───────────┐
+    ml► │  MUX ML   │   │  MUX AL   │ ◄al    (entradas del + )
+    mr► │  MUX MR   │   │  MUX AR   │ ◄ar
+        └─────┬─────┘   └─────┬─────┘
+           ┌──┴──┐         ┌──┴──┐
+           │  ×  │──►MUL    │  +  │──►ADD
+           └─────┘         └─────┘
+              (R1)──►┌──────┐──►SHR
+                     │ &gt;&gt;1  │──►──┤▷├──► OUT
+                     └──────┘      ▲ h
+</code></pre>
+<ul>
+<li>MUX de registros: R1 (3:1), R2 (2:1), R3 (3:1), R4 (2:1), R5 y R6 directos.</li>
+<li>MUX de unidades: ML (4:1), MR (3:1), AL (3:1), AR (3:1 con la constante &quot;1&quot;).</li>
+<li>Desplazador directo desde R1; three-state a la salida.</li>
+<li><strong>0 señales de estado</strong> (no hay decisiones sobre datos).</li>
+</ul>
+<p>Hasta aquí es el diseño que te pedían en el parcial (puntos 1–3). Lo que sigue es la <strong>síntesis extra</strong>: buses y segmentación.</p>
+<hr>
+<h2>5. Agrupación de conexiones → buses (grafos)</h2>
+<h3>5.1 Qué son los nodos</h3>
+<p>Cada <strong>lectura de un registro</strong> es una conexión. Agrupamos conexiones que <strong>nunca se usan en el mismo estado</strong> en un mismo bus (acceso por three-state).</p>
+<h3>5.2 Tabla de conexiones de lectura (estados S1–S6; el desplazador lee R1 por cable aparte)</h3>
+<table>
+<thead>
+<tr>
+<th>Fuente (lee)</th>
+<th>S1</th>
+<th>S2</th>
+<th>S3</th>
+<th>S4</th>
+<th>S5</th>
+<th>S6</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>R1 (y, t7)</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td>X</td>
+<td>X</td>
+</tr>
+<tr>
+<td>R2 (b, t5)</td>
+<td></td>
+<td></td>
+<td></td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+</tr>
+<tr>
+<td>R3 (a, t4)</td>
+<td></td>
+<td></td>
+<td>X</td>
+<td>X</td>
+<td>X</td>
+<td></td>
+</tr>
+<tr>
+<td>R4 (x, t3)</td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td>X</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>R5 (t2)</td>
+<td></td>
+<td></td>
+<td></td>
+<td>X</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>R6 (t1)</td>
+<td></td>
+<td>X</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>&quot;1&quot;</td>
+<td>X</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><strong>Fuentes activas</strong></td>
+<td>2</td>
+<td>2</td>
+<td>2</td>
+<td><strong>4</strong></td>
+<td>3</td>
+<td>2</td>
+</tr>
+</tbody></table>
+<p><strong>Mínimo de buses de lectura = 4</strong> (estado S4 lee R2, R3, R4, R5 a la vez).</p>
+<h3>5.3 Arcos de incompatibilidad (misma columna)</h3>
+<table>
+<thead>
+<tr>
+<th>Estado</th>
+<th>Fuentes que coinciden → incompatibles entre sí</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>S1</td>
+<td>R4, &quot;1&quot;</td>
+</tr>
+<tr>
+<td>S2</td>
+<td>R4, R6</td>
+</tr>
+<tr>
+<td>S3</td>
+<td>R3, R6</td>
+</tr>
+<tr>
+<td>S4</td>
+<td>R2, R3, R4, R5 (todos entre sí)</td>
+</tr>
+<tr>
+<td>S5</td>
+<td>R1, R2, R3 (todos entre sí)</td>
+</tr>
+<tr>
+<td>S6</td>
+<td>R1, R2</td>
+</tr>
+</tbody></table>
+<h3>5.4 Grafo de conflicto y asignación</h3>
+<p>R2, R3, R4, R5 forman un grupo mutuamente incompatible (S4) → cada uno necesita su propio bus → 4 buses como mínimo, ya lo sabíamos. Repartimos R1, R6 y &quot;1&quot; en esos 4 buses buscando compatibilidad:</p>
+<pre><code> Grafo de conflicto (línea = incompatibles):
+
+        &quot;1&quot;───R4───R6
+               │ \  │
+              R5  R2─R3
+                   │  │
+                  R1──┘
+
+ Asignación (colorear con 4 colores):
+   BUS A = { R4, R1 }      (R4 y R1 nunca coinciden: R4 en S1,S2,S4; R1 en S5,S6)
+   BUS B = { R2, R6, &quot;1&quot; } (no coinciden: &quot;1&quot; en S1, R6 en S2–S3, R2 en S4–S6)
+   BUS C = { R3 }
+   BUS D = { R5 }
+</code></pre>
+<p>Comprobación del bus A: R4 activa en S1, S2, S4; R1 activa en S5, S6 → no se pisan ✓.
+Comprobación del bus B: &quot;1&quot; en S1, R6 en S2–S3, R2 en S4–S6 → no se pisan ✓.</p>
+<h3>5.5 Buses de escritura</h3>
+<p>Resultados por estado: S1 (×,+), S2 (×), S3 (×), S4 (×,+), S5 (×,+), S6 (+), S7 (&gt;&gt;), S8 (&gt;&gt;).
+Máximo 2 a la vez (×y+) → <strong>2 buses de escritura</strong>:</p>
+<ul>
+<li><strong>BUS W1</strong> = salida del multiplicador.</li>
+<li><strong>BUS W2</strong> = salida del sumador <strong>o</strong> del desplazador (nunca escriben el mismo estado), cada uno con su three-state.</li>
+</ul>
+<h3>5.6 Resultado</h3>
+<p><strong>4 buses de lectura + 2 de escritura = 6 buses</strong>, en lugar de las ~13 conexiones punto a punto. Cada registro y cada unidad accede con three-state.</p>
+<hr>
+<h2>6. Camino de datos final con buses</h2>
+<pre><code>   in4          in2          in1          in3
+    │            │            │            │
+  ┌─▼──┐       ┌─▼──┐       ┌─▼──┐       ┌─▼──┐
+  │ R1 │       │ R2 │       │ R3 │       │ R4 │   R5(t2)   R6(t1)
+  └─┬┬─┘       └─┬┬─┘       └─┬┬─┘       └─┬┬─┘    │ │       │ │
+    ││           ││           ││           ││      │ │       │ │
+ ═══╪╪═══════════╪╪═══════════╪╪═══════════╪╪══════╪═╪═══════╪═╪═ BUS A {R4,R1}
+ ═══╪╪═══════════╪╪═══════════╪╪═══════════╪╪══════╪═╪═══════╪═╪═ BUS B {R2,R6,&quot;1&quot;}
+ ═══╪╪═══════════╪╪═══════════╪╪═══════════╪╪══════╪═╪═══════╪═╪═ BUS C {R3}
+ ═══╪╪═══════════╪╪═══════════╪╪═══════════╪╪══════╪═╪═══════╪═╪═ BUS D {R5}
+    ▷▷ (three-states de lectura de cada registro hacia su bus)
+    │            │            │
+  ┌─▼────────────▼─┐        ┌─▼──────┐
+  │  MULTIPLICADOR │        │ SUMADOR│      ┌────────┐
+  │  (ML←A/C, MR←  │        │(AL←A/C,│      │  &gt;&gt;1   │◄─ R1 (cable)
+  │   A/B)         │        │ AR←B/D)│      └───┬────┘
+  └───────┬────────┘        └───┬────┘          │
+ ═════════╪═════════════════════╪═══════════════╪══ BUS W1 (resultado ×)
+ ═════════╪═════════════════════╪═══════════════╪══ BUS W2 (resultado + / &gt;&gt;)
+          ▷ (three-states de escritura)         ▷
+          └──────────► a los MUX de R1..R6       └──► OUT (three-state h)
+</code></pre>
+<p>Palabra de control: selectores de los buses de lectura de cada registro, selectores de entrada de cada unidad (qué bus), habilitadores de escritura de cada bus, LD de cada registro, <code>h</code>. Una fila por estado (misma lógica que ya hiciste en el parcial).</p>
+<hr>
+<h2>7. Modelo de retardos (para medir las segmentaciones)</h2>
+<p>En el examen te dan los números; aquí uso estos para poder calcular (proporciones realistas):</p>
+<table>
+<thead>
+<tr>
+<th>Elemento</th>
+<th>Retardo</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Registro (clk→Q + setup)</td>
+<td>2 ns</td>
+</tr>
+<tr>
+<td>ROM de salida de la UC</td>
+<td>3 ns</td>
+</tr>
+<tr>
+<td>MUX / three-state (un nivel)</td>
+<td>1 ns</td>
+</tr>
+<tr>
+<td>Multiplicador</td>
+<td>16 ns</td>
+</tr>
+<tr>
+<td>Sumador</td>
+<td>8 ns</td>
+</tr>
+<tr>
+<td>Desplazador &gt;&gt;1</td>
+<td>1 ns</td>
+</tr>
+</tbody></table>
+<p><strong>Periodo base.</strong> Camino de un estado Moore = clk→Q(1) + ROM(3) + MUX(1) + unidad + MUX(1) + setup(1) = <strong>7 + t_unidad</strong>.</p>
+<ul>
+<li>Multiplicador: 7 + 16 = <strong>23 ns</strong> ← camino crítico.</li>
+<li>Sumador: 7 + 8 = 15 ns. Desplazador: 7 + 1 = 8 ns.</li>
+</ul>
+<p><strong>Tiempo por resultado (base):</strong> 9 estados × 23 ns = <strong>207 ns</strong>.</p>
+<hr>
+<h2>8. Segmentación de la unidad funcional (el multiplicador en 2 etapas)</h2>
+<h3>8.1 Por qué el multiplicador</h3>
+<p>El multiplicador es la unidad lenta (16 ns) y fija el reloj. Lo partimos en <strong>2 etapas</strong> con un registro interno:</p>
+<pre><code>       ML   MR
+        │   │
+     ┌──▼───▼──┐
+     │ Etapa 1 │  8 ns     ← primera mitad del producto
+     └────┬────┘
+        ║reg║              ← registro de segmentación (interno)
+     ┌────▼────┐
+     │ Etapa 2 │  8 ns     ← segunda mitad
+     └────┬────┘
+          ▼
+         MUL
+</code></pre>
+<h3>8.2 Nuevo reloj</h3>
+<ul>
+<li>Etapa 1 del ×: clk→Q(1) + ROM(3) + MUX(1) + 8 + setup(1) = 14 ns</li>
+<li>Etapa 2 del ×: clk→Q(1) + 8 + MUX(1) + setup(1) = 11 ns</li>
+<li>Sumador (completo, sin segmentar): 7 + 8 = <strong>15 ns</strong> ← ahora manda el sumador</li>
+</ul>
+<p><strong>T = 15 ns</strong> (antes 23).</p>
+<h3>8.3 Regla de temporización</h3>
+<blockquote>
+<p>Una multiplicación <strong>lanzada</strong> en Sk entrega su resultado al final de Sk+1; se puede <strong>usar a partir de Sk+2</strong>.</p>
+</blockquote>
+<p>Por eso en cada estado hay que mirar <strong>dos cosas</strong>: qué multiplicación se lanza (entradas del ×) y qué multiplicación termina (su resultado va a un registro).</p>
+<h3>8.4 Replanificación (rellenar las 2 etapas con multiplicaciones independientes)</h3>
+<p>La única multiplicación independiente de la cadena es <strong>y·y</strong>. La lanzamos temprano para que la etapa 2 no quede vacía:</p>
+<table>
+<thead>
+<tr>
+<th>Estado</th>
+<th>Lanza en ×</th>
+<th>Termina (se guarda)</th>
+<th>Sumador</th>
+<th>Desplazador</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>S1</td>
+<td>t1 = x·x</td>
+<td>—</td>
+<td>t2 = 1+x</td>
+<td>—</td>
+</tr>
+<tr>
+<td>S2</td>
+<td>t8 = y·y</td>
+<td>t1</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>S3</td>
+<td>t3 = t1·x</td>
+<td>t8</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>S4</td>
+<td>t4 = a·t1</td>
+<td>t3</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>S5</td>
+<td>t5 = b·t3</td>
+<td>t4</td>
+<td>—</td>
+<td>—</td>
+</tr>
+<tr>
+<td>S6</td>
+<td>—</td>
+<td>t5</td>
+<td>t6 = t2+t4</td>
+<td>—</td>
+</tr>
+<tr>
+<td>S7</td>
+<td>—</td>
+<td>—</td>
+<td>t7 = t6+t5</td>
+<td>—</td>
+</tr>
+<tr>
+<td>S8</td>
+<td>—</td>
+<td>—</td>
+<td>t9 = t8+t7</td>
+<td>—</td>
+</tr>
+<tr>
+<td>S9</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>t9 = t9&gt;&gt;1</td>
+</tr>
+<tr>
+<td>S10</td>
+<td>—</td>
+<td>—</td>
+<td>—</td>
+<td>out = t9&gt;&gt;1</td>
+</tr>
+</tbody></table>
+<p>Comprobación de dependencias (lanzada en Sk → disponible en Sk+2):</p>
+<ul>
+<li>t3 (S3) usa t1, lanzado en S1 → disponible S3 ✓</li>
+<li>t4 (S4) usa t1 (S1) → ✓</li>
+<li>t5 (S5) usa t3, lanzado en S3 → disponible S5 ✓</li>
+<li>t6 (S6) usa t4 (lanzado S4 → disp. S6) ✓</li>
+<li>t7 (S7) usa t5 (lanzado S5 → disp. S7) ✓</li>
+<li>t9 (S8) usa t8 (lanzado S2 → disp. S4, de sobra) ✓</li>
+</ul>
+<h3>8.5 Diagrama de tiempos (reservas de cada unidad)</h3>
+<pre><code> Ciclo:        S1   S2   S3   S4   S5   S6   S7   S8   S9  S10
+ × etapa 1:    t1   t8   t3   t4   t5    ·    ·    ·    ·   ·
+ × etapa 2:    ·    t1   t8   t3   t4   t5    ·    ·    ·   ·
+ Sumador:      t2   ·    ·    ·    ·    t6   t7   t9    ·   ·
+ Desplazador:  ·    ·    ·    ·    ·    ·    ·    ·   &gt;&gt;1  &gt;&gt;1→out
+</code></pre>
+<p>Una multiplicación avanza en diagonal (etapa 1 → etapa 2). El multiplicador acepta una nueva cada ciclo.</p>
+<h3>8.6 Resultado de segmentar la UF</h3>
+<ul>
+<li>Estados: S0 + 10 = <strong>11 ciclos</strong>.</li>
+<li>Tiempo: 11 × 15 ns = <strong>165 ns</strong> (base 207 ns). <strong>Ganancia 1,25×.</strong></li>
+<li>Registros: al replanificar, el máximo de variables vivas baja a <strong>5</strong> (el registro interno del × guarda un valor &quot;en vuelo&quot;). Un registro menos en el CD.</li>
+</ul>
+<blockquote>
+<p>Conclusión honesta (como en tus apuntes): la ganancia es modesta porque el algoritmo es muy <strong>encadenado</strong> (una multiplicación depende de la anterior). Solo y·y es independiente y rellena un hueco. Segmentar la UF ayuda poco cuando casi todo está en serie.</p>
+</blockquote>
+<hr>
+<h2>9. Segmentación del camino de datos (pipeline completo)</h2>
+<p>Esto tiene sentido si hay que calcular la ecuación para <strong>muchos juegos de datos</strong> (a,b,x,y) seguidos y se busca productividad (un resultado por ciclo), no un cálculo rápido aislado.</p>
+<h3>9.1 Niveles del DFG (planificación ASAP, sin límite de recursos)</h3>
+<table>
+<thead>
+<tr>
+<th>Nivel</th>
+<th>Operaciones</th>
+<th>Retardo</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>N1</td>
+<td>t1=x·x, t2=1+x, t8=y·y</td>
+<td>16 (×)</td>
+</tr>
+<tr>
+<td>N2</td>
+<td>t3=t1·x, t4=a·t1</td>
+<td>16</td>
+</tr>
+<tr>
+<td>N3</td>
+<td>t5=b·t3, t6=t2+t4</td>
+<td>16</td>
+</tr>
+<tr>
+<td>N4</td>
+<td>t7=t6+t5</td>
+<td>8</td>
+</tr>
+<tr>
+<td>N5</td>
+<td>t9=t8+t7</td>
+<td>8</td>
+</tr>
+<tr>
+<td>N6</td>
+<td>&gt;&gt;1, &gt;&gt;1</td>
+<td>2</td>
+</tr>
+</tbody></table>
+<h3>9.2 Balanceo</h3>
+<p>Cada etapa de pipeline cuesta: retardo lógico + 2 ns de registro (sin ROM ni MUX, porque cada unidad tiene conexión fija).</p>
+<table>
+<thead>
+<tr>
+<th>Opción</th>
+<th>Etapas</th>
+<th>Etapa más lenta</th>
+<th>T</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>5 etapas: {N1}{N2}{N3}{N4}{N5,N6}</td>
+<td>5</td>
+<td>16+2 = 18</td>
+<td><strong>18 ns</strong></td>
+</tr>
+</tbody></table>
+<p>Las etapas de multiplicación (16 ns) mandan; partir más no ayuda sin segmentar el propio multiplicador.</p>
+<h3>9.3 Esquema del CD segmentado</h3>
+<pre><code>         ┌──── E1 ────┐   ┌─ E2 ─┐   ┌─ E3 ─┐   ┌─ E4 ─┐   ┌──── E5 ────┐
+ a ─►║   │ t1 = x·x   │ ║ │t3=t1·x│ ║│t5=b·t3│ ║│t7=   │ ║ │ t9=t8+t7   │ ║─► out
+ b ─►║   │ t2 = 1+x   │ ║ │t4=a·t1│ ║│t6=t2+t4│║│t6+t5 │ ║ │ &gt;&gt;1  &gt;&gt;1   │ ║
+ x ─►║   │ t8 = y·y   │ ║ │       │ ║│       │ ║│      │ ║ │            │ ║
+ y ─►║   │ (2×, 1+)   │ ║ │(2×)   │ ║│(1×,1+)│ ║│(1+)  │ ║ │ (1+, 2&gt;&gt;)  │ ║
+     reg entrada     reg E1/E2   reg E2/E3  reg E3/E4  reg E4/E5    reg salida
+</code></pre>
+<h3>9.4 Registros de segmentación (lo que cruza cada frontera, incluidos los que solo &quot;pasan&quot;)</h3>
+<table>
+<thead>
+<tr>
+<th>Registro</th>
+<th>Guarda</th>
+<th>Comentario</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Entrada</td>
+<td>a, b, x, y</td>
+<td>4</td>
+</tr>
+<tr>
+<td>E1/E2</td>
+<td>t1, t2, t8, x, a, b</td>
+<td>t2, t8, b solo pasan</td>
+</tr>
+<tr>
+<td>E2/E3</td>
+<td>t3, t4, t2, t8</td>
+<td>t8 solo pasa</td>
+</tr>
+<tr>
+<td>E3/E4</td>
+<td>t5, t6, t8</td>
+<td>t8 solo pasa</td>
+</tr>
+<tr>
+<td>E4/E5</td>
+<td>t7, t8</td>
+<td></td>
+</tr>
+<tr>
+<td>Salida</td>
+<td>out</td>
+<td></td>
+</tr>
+</tbody></table>
+<p>El dato t8 viaja por 3 fronteras hasta que se usa en E5: ése es el <strong>costo oculto</strong> de segmentar (hay que retrasar los datos para que lleguen junto con su mismo juego).</p>
+<h3>9.5 Hardware y métricas</h3>
+<ul>
+<li>Hardware: <strong>5 multiplicadores, 4 sumadores, 2 desplazadores</strong> y ~20 registros de segmentación. Ya <strong>no se comparte</strong>: cada operación tiene su unidad.</li>
+<li>Latencia (un resultado): 5 × 18 = <strong>90 ns</strong>.</li>
+<li>Productividad: <strong>1 resultado cada 18 ns</strong> (una vez lleno el pipeline).</li>
+<li>Para N juegos de datos: (5 + N − 1) × 18 ns.<ul>
+<li>N = 1000 → 1004 × 18 = 18 072 ns, frente a 1000 × 207 = 207 000 ns del diseño base → ~11× más rápido para flujos largos.</li>
+</ul>
+</li>
+<li>Ganancia de <strong>la segmentación en sí</strong> (contra el mismo hardware sin registros, que tardaría 16+16+16+8+2 ≈ 58 ns + 2 = 60 ns por resultado): 60 / 18 ≈ <strong>3,3×</strong> (la ideal con 5 etapas sería 5; se pierde por el desbalance, las etapas de suma usan 8 de 16 ns).</li>
+</ul>
+<hr>
+<h2>10. Resultado final y comparación</h2>
+<table>
+<thead>
+<tr>
+<th>Diseño</th>
+<th>Periodo T</th>
+<th>Ciclos</th>
+<th>Tiempo / resultado</th>
+<th>Hardware</th>
+<th>Registros</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Base (parcial)</strong></td>
+<td>23 ns</td>
+<td>9</td>
+<td><strong>207 ns</strong></td>
+<td>1×, 1+, 1&gt;&gt;</td>
+<td>6</td>
+</tr>
+<tr>
+<td><strong>+ buses</strong></td>
+<td>23 ns</td>
+<td>9</td>
+<td>207 ns (igual tiempo, menos cables)</td>
+<td>1×, 1+, 1&gt;&gt;</td>
+<td>6</td>
+</tr>
+<tr>
+<td><strong>UF segmentada</strong> (× en 2 etapas)</td>
+<td>15 ns</td>
+<td>11</td>
+<td><strong>165 ns</strong></td>
+<td>× con reg. interno</td>
+<td>5</td>
+</tr>
+<tr>
+<td><strong>CD segmentado</strong> (5 etapas)</td>
+<td>18 ns</td>
+<td>1 por resultado</td>
+<td><strong>18 ns/dato</strong> (flujo)</td>
+<td>5×, 4+, 2&gt;&gt;</td>
+<td>~20</td>
+</tr>
+</tbody></table>
+<h3>Lo que hay que saber responder</h3>
+<ol>
+<li><strong>Agrupar variables</strong> (lado izquierdo) → 6 registros. Es lo que pedía el parcial.</li>
+<li><strong>Agrupar operadores</strong> (grafos) → confirma que 1 ×, 1 + y 1 &gt;&gt; bastan; los pesos fuente/destino dicen cómo elegir operandos para achicar los MUX.</li>
+<li><strong>Agrupar conexiones</strong> (grafos) → 4 buses de lectura + 2 de escritura.</li>
+<li><strong>Segmentar la UF</strong>: partir el multiplicador en 2 etapas, replanificar lanzando y·y en el hueco → 165 ns, 5 registros. Ganancia modesta por ser un algoritmo encadenado.</li>
+<li><strong>Segmentar el CD</strong>: 5 etapas por niveles, un resultado por ciclo → ideal para procesar muchos datos; ganancia ≈ número de etapas.</li>
+</ol>
+<h3>Reglas que se repiten (las tres agrupaciones son el mismo método)</h3>
+<ul>
+<li>Registros mínimos = <strong>máx. variables vivas en un estado</strong>.</li>
+<li>Unidades mínimas de un tipo = <strong>máx. operaciones de ese tipo en un estado</strong>.</li>
+<li>Buses mínimos = <strong>máx. conexiones activas en un estado</strong>.</li>
+<li>Segmentar = cambiar latencia por productividad; la ganancia la limita la <strong>etapa más lenta</strong> y las <strong>dependencias</strong>.</li>
+</ul>
+<hr>
+<blockquote>
+<p>Los retardos de las secciones 7–9 son de ejemplo para poder dar números; en tu examen usa los que te den. Si quieres, puedo añadir la <strong>palabra de control completa</strong> (tabla por estado) de cualquiera de las versiones segmentadas, o el <strong>grafo de operadores/conexiones dibujado con los pesos f/d</strong> si me confirmas los valores que usa tu profesor.</p>
+</blockquote>
+</body></html>
