@@ -1,4 +1,7 @@
 # Cómo hacer segmentación (pipeline) — método del profesor, paso a paso
+
+> **Corrección (nov. 2026):** en la tabla de tiempos del profesor cada operación ocupa **una sola columna** (en esa columna se leen los registros, trabaja la UF y se marca la escritura, que queda disponible en la columna siguiente), no tres ciclos como dice la sección 7.2 de esta guía. La tabla completa y bien explicada, y el mismo método aplicado al parcial 2, están en [parcial2_sintesis_resuelto.md](parcial2_sintesis_resuelto.md), sección 7.
+
 ### Con todas las gráficas y el ejercicio de la raíz desarrollado completo
 
 > Reconstruido a partir de tus apuntes y de las capturas de Numbers ("Segmentación_263"). Se usa el ejercicio que el profesor desarrolla en clase:
