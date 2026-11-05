@@ -1,0 +1,470 @@
+<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Segmentacion paso a paso</title><style>body{font-family:Segoe UI,Arial,sans-serif;max-width:1000px;margin:auto;padding:24px;line-height:1.55;color:#222}
+pre{background:#f4f4f4;padding:12px;overflow-x:auto;font-size:12.5px;line-height:1.25;border-radius:6px}
+code{font-family:Consolas,'DejaVu Sans Mono',monospace}
+table{border-collapse:collapse;margin:10px 0;font-size:14px}th,td{border:1px solid #bbb;padding:4px 8px}th{background:#e8eef7}
+h1{border-bottom:3px solid #345;padding-bottom:4px}h2{border-bottom:1px solid #aaa;margin-top:40px}
+blockquote{border-left:4px solid #6a8;margin:0;padding:4px 12px;background:#f3faf5}</style></head><body><h1>Cómo hacer segmentación (pipeline) — método del profesor, paso a paso</h1>
+<h3>Con todas las gráficas y el ejercicio de la raíz desarrollado completo</h3>
+<blockquote>
+<p>Reconstruido a partir de tus apuntes y de las capturas de Numbers (&quot;Segmentación_263&quot;). Se usa el ejercicio que el profesor desarrolla en clase:</p>
+<p>  <strong>√(a² + b²) ≈ máx( 0,875·x + 0,5·y , x )</strong>,  x = máx(|a|,|b|),  y = mín(|a|,|b|)</p>
+<p>Al final se muestra cómo trasladar el mismo método a otros ejercicios. Sin código, solo diseño.</p>
+</blockquote>
+<hr>
+<h2>Índice</h2>
+<ol>
+<li>Qué es segmentar y las dos clases que hay</li>
+<li>El ejercicio: ASM y de dónde salen las operaciones</li>
+<li>La idea central: cortar el ASM en niveles</li>
+<li>Paso 1 — Partir el ASM con la línea de corte</li>
+<li>Paso 2 — Agrupar variables <strong>dentro de cada nivel</strong></li>
+<li>Paso 3 — El camino de datos de cada nivel</li>
+<li>Paso 4 — La tabla de análisis de tiempos (lo más importante)</li>
+<li>Paso 5 — Solapar conjuntos de datos (el pipeline en acción)</li>
+<li>Paso 6 — Calcular la ganancia (% de mejora)</li>
+<li>La otra segmentación: partir una unidad funcional</li>
+<li>Receta para cualquier ejercicio</li>
+<li>Resumen</li>
+</ol>
+<hr>
+<h2>1. Qué es segmentar y las dos clases que hay</h2>
+<p><strong>Segmentar (pipeline)</strong> = dividir el trabajo en <strong>etapas</strong> separadas por <strong>registros</strong>, para que varios juegos de datos se procesen a la vez, cada uno en una etapa distinta. Como una cadena de montaje: mientras un auto está en pintura, otro ya entró en chasis.</p>
+<pre><code>   SIN segmentar (un dato a la vez):        CON segmentar (varios a la vez):
+
+   ┌──────────────┐                         ┌────┐ ║ ┌────┐ ║ ┌────┐
+   │   TODO el     │                        │ E1 │ ║ │ E2 │ ║ │ E3 │
+   │   cálculo     │ ──► OUT                 └────┘ ║ └────┘ ║ └────┘
+   └──────────────┘                          reg      reg
+     tarda t_total                         cada etapa tarda t_total/3
+</code></pre>
+<p>En el curso hay <strong>dos</strong> cosas que se pueden segmentar:</p>
+<table>
+<thead>
+<tr>
+<th>Qué se segmenta</th>
+<th>Qué se parte</th>
+<th>Para qué sirve</th>
+<th>Dónde en esta guía</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>El camino de datos</strong></td>
+<td>todo el algoritmo, en niveles</td>
+<td>procesar muchos juegos de datos seguidos</td>
+<td>secciones 3–9 (lo principal)</td>
+</tr>
+<tr>
+<td><strong>Una unidad funcional</strong></td>
+<td>una sola unidad (p. ej. el sumador) en 2 etapas internas</td>
+<td>subir el reloj de esa unidad</td>
+<td>sección 10</td>
+</tr>
+</tbody></table>
+<p>Esta guía se centra en la <strong>del camino de datos</strong>, que es la de tus capturas de Numbers.</p>
+<hr>
+<h2>2. El ejercicio: ASM y de dónde salen las operaciones</h2>
+<p>Pseudoalgoritmo (de tus apuntes):</p>
+<pre><code> a = in1, b = in2, FINAL = 0
+ si INICIO = 1:
+    t1 = |a|           t2 = |b|
+    x  = máx(t1,t2)    y  = mín(t1,t2)
+    t3 = x &gt;&gt; 3        (x/8)
+    t4 = y &gt;&gt; 1        (y/2)
+    t5 = x − t3        (0,875·x)
+    t6 = t5 + t4       (0,875·x + 0,5·y)
+    t7 = máx(t6, x)
+    SAL = t7, FINAL = 1
+</code></pre>
+<p>ASM (un estado por paso):</p>
+<pre><code>        ┌─────────────────┐
+   ┌───►│ S0 a=in1 b=in2  │◄──────────┐
+   │    │    FINAL=0       │           │
+   │    └───────┬─────────┘           │
+   │     0  ◇ INICIO ◇ 1              │
+   └─────────┤      └────┐            │
+                        ▼             │
+              ┌──────────────────┐    │
+              │ S1 t1=|a| t2=|b| │    │   ← NIVEL
+              └─────────┬────────┘    │     SUPERIOR
+              ┌─────────▼────────┐    │
+              │ S2 x=máx(t1,t2)  │    │
+              │    y=mín(t1,t2)  │    │
+              └─────────┬────────┘    │
+              ┌─────────▼────────┐    │
+              │ S3 t3=x&gt;&gt;3       │    │
+              │    t4=y&gt;&gt;1       │    │
+              └─────────┬────────┘    │
+        ══════════════════════════════════  ← LÍNEA DE CORTE (roja)
+              ┌─────────▼────────┐    │
+              │ S4 t5=x−t3       │    │   ← NIVEL
+              └─────────┬────────┘    │     INFERIOR
+              ┌─────────▼────────┐    │
+              │ S5 t6=t5+t4      │    │
+              └─────────┬────────┘    │
+              ┌─────────▼────────┐    │
+              │ S6 t7=máx(t6,x)  │    │
+              └─────────┬────────┘    │
+              ┌─────────▼────────┐    │
+              │ S7 SAL=t7 FINAL=1│────┘
+              └──────────────────┘
+</code></pre>
+<p>La <strong>línea roja</strong> es la que dibuja el profesor en el ASM: corta el algoritmo en dos mitades.</p>
+<hr>
+<h2>3. La idea central: cortar el ASM en niveles</h2>
+<p>El profesor NO hace 6 etapas pequeñas (una por operación). Hace <strong>2 niveles grandes</strong>:</p>
+<ul>
+<li><strong>Nivel Superior (NS):</strong> la primera mitad del ASM (hasta la línea roja).</li>
+<li><strong>Nivel Inferior (NI):</strong> la segunda mitad.</li>
+</ul>
+<p>Entre los dos niveles se pone un <strong>registro de frontera</strong> (la línea punteada de la tabla de tiempos). Mientras el nivel inferior termina el juego de datos nº 1, el nivel superior ya empieza el juego nº 2. Eso es el pipeline.</p>
+<pre><code>                 ┌──────────────┐           ┌──────────────┐
+   a,b (juego k)►│ NIVEL         │  ═reg═►   │ NIVEL        │──► SALIDA (juego k)
+                 │ SUPERIOR      │ frontera  │ INFERIOR     │
+                 │ (S1,S2,S3)    │           │ (S4,S5,S6,S7)│
+                 └──────────────┘           └──────────────┘
+                   trabaja en el               trabaja en el
+                   juego k+1                    juego k
+</code></pre>
+<p><strong>¿Por dónde se corta?</strong> Por un punto donde &quot;pase poca cosa&quot; de un nivel al otro (pocas variables cruzan la frontera) y donde los dos lados queden parecidos de tamaño. En este ejercicio, la línea va <strong>después de t3, t4</strong> (fin de S3). Lo único que necesita el nivel inferior del superior es <strong>x, t3, t4</strong> (y x otra vez para el máx final).</p>
+<hr>
+<h2>4. Paso 1 — Partir el ASM con la línea de corte</h2>
+<p>Lista qué operaciones y qué estados quedan en cada nivel:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Estados</th>
+<th>Operaciones</th>
+<th>Qué recibe del nivel anterior</th>
+<th>Qué entrega</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Nivel Superior</strong></td>
+<td>S1, S2, S3</td>
+<td>t1=|a|, t2=|b|, x=máx, y=mín, t3=x&gt;&gt;3, t4=y&gt;&gt;1</td>
+<td>a, b (entradas)</td>
+<td>x, t3, t4</td>
+</tr>
+<tr>
+<td><strong>Nivel Inferior</strong></td>
+<td>S4, S5, S6, S7</td>
+<td>t5=x−t3, t6=t5+t4, t7=máx(t6,x), salida</td>
+<td>x, t3, t4</td>
+<td>SALIDA</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>5. Paso 2 — Agrupar variables <strong>dentro de cada nivel</strong></h2>
+<p>Aquí está el detalle que no es obvio: la agrupación de variables (lado izquierdo) se hace <strong>por separado en cada nivel</strong>, no en todo el algoritmo junto. Es tu hoja de Numbers &quot;SEGMENTACIÓN DEL CD (UNA PARTE) - Agrupación de variables&quot;.</p>
+<h3>5.1 Nivel Superior</h3>
+<p>Tiempos de vida solo dentro del NS (estados s1–s4 de esa hoja):</p>
+<pre><code>          s1  s2  s3  s4   vida
+   b       X   X            2        → R1 (b, t2)
+   a       X                1        → R2 (a, t1)
+   t1          X   X   X    3
+   t2              X   X    2
+          ───────────────
+  REG      2   2   2   2
+</code></pre>
+<p>Máximo = 2 → <strong>2 registros en el nivel superior</strong>:</p>
+<pre><code>   R1 = { b, t2 }
+   R2 = { a, t1 }
+</code></pre>
+<p>(En la hoja aparecen más variables como x, y; el principio es el mismo, lo que manda es el máximo de la columna.)</p>
+<h3>5.2 Nivel Inferior</h3>
+<pre><code>          s4  s5  s6  s7  s8   vida
+   x       X   X   X   X        4    → R3 (x, t7)
+   t3      X   X                2    → R4 (t3, t5, t6)
+   t4          X   X            2    → R5 (t4)
+   t5              X            1
+   t6                  X        1
+   t7                      X    1
+          ───────────────────
+  REG      2   3   3   2   1
+</code></pre>
+<p>Máximo = 3 → <strong>3 registros en el nivel inferior</strong>:</p>
+<pre><code>   R3 = { x, t7 }
+   R4 = { t3, t5, t6 }
+   R5 = { t4 }
+</code></pre>
+<p><strong>En total: 2 + 3 = 5 registros.</strong> (Un diseño sin segmentar necesitaba 3; aquí hay más porque cada nivel tiene su propio banco, y porque x, t3, t4 deben cruzar la frontera.)</p>
+<hr>
+<h2>6. Paso 3 — El camino de datos de cada nivel</h2>
+<p>Cada nivel es un mini camino de datos con sus registros, sus unidades funcionales y sus MUX. El registro de frontera conecta los dos.</p>
+<pre><code> ── NIVEL SUPERIOR ─────────────────────────────────
+     in1(a)        in2(b)
+       │             │
+     ┌─▼──┐        ┌─▼──┐
+     │ R2 │        │ R1 │
+     │a,t1│        │b,t2│
+     └─┬──┘        └─┬──┘
+       └──────┬──────┘
+          ┌───▼───┐  ┌───────┐
+          │ |a||b|│  │máx mín│   (unidades del NS)
+          └───┬───┘  └───┬───┘
+              └─────┬────┘
+            ┌───────▼────────┐  ┌──────┐ ┌──────┐
+            │ realim. a R1,R2│  │ &gt;&gt;3  │ │ &gt;&gt;1  │
+            └────────────────┘  └──┬───┘ └──┬───┘
+                                   │        │
+ ══════════════ REGISTRO DE FRONTERA (x, t3, t4) ══════════════
+                                   │        │
+ ── NIVEL INFERIOR ────────────────▼────────▼──────
+     ┌─▼──┐      ┌──▼─┐      ┌──▼─┐
+     │ R3 │      │ R4 │      │ R5 │
+     │x,t7│      │t3, │      │ t4 │
+     │    │      │t5,t6│     │    │
+     └─┬──┘      └─┬──┘      └─┬──┘
+       └─────┬─────┴─────┬─────┘
+          ┌──▼──┐     ┌──▼──┐
+          │  −  │     │  +  │   ┌──────┐
+          └──┬──┘     └──┬──┘   │ máx  │
+             └─────┬─────┴──────┘
+                   ▼
+                  SALIDA (three-state)
+</code></pre>
+<hr>
+<h2>7. Paso 4 — La tabla de análisis de tiempos (lo más importante)</h2>
+<p>Ésta es tu hoja 4 de Numbers (&quot;Análisis de tiempos - SEGMENTACIÓN el CD&quot;). Es una tabla <strong>ciclo por ciclo</strong>. Cada operación necesita <strong>tres ciclos</strong>:</p>
+<ol>
+<li><strong>Leer</strong> el/los registros fuente (Leer Rx).</li>
+<li><strong>Ejecutar</strong> en la unidad funcional (UF-NS o UF-NI).</li>
+<li><strong>Escribir</strong> el resultado en el registro destino (Esc Rx).</li>
+</ol>
+<p>Las filas de tu tabla son exactamente éstas:</p>
+<pre><code>  Leer R1 / Leer R2      (fuentes del nivel superior)
+  UF-NS                  (unidades del nivel superior)
+  &gt;&gt;1 , &gt;&gt;3              (desplazadores)
+  Esc R1 / Esc R2        (escrituras del nivel superior)
+  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─    (línea punteada = frontera entre niveles)
+  Leer R3 / Leer R4 / Leer R5   (fuentes del nivel inferior)
+  UF-NI                  (unidades del nivel inferior)
+  Esc R3 / Esc R4 / Esc R5      (escrituras del nivel inferior)
+  Salida
+</code></pre>
+<h3>7.1 Un solo juego de datos (sin solapar todavía)</h3>
+<p>Columnas = ciclos s0, s1, s2, … Pongo qué hace cada fila en cada ciclo para <strong>el primer juego</strong> (color celeste en tus capturas):</p>
+<pre><code> Elemento \ ciclo   s0  s1  s2  s3  s4  s5  s6  s7
+ ───────────────────────────────────────────────
+ Leer R1                 b   t2
+ Leer R2             a   t1
+ UF-NS              abs abs máx mín
+                    (a) (b)
+ &gt;&gt;1                             X
+ &gt;&gt;3                         X
+ Esc R1              b       t2
+ Esc R2             a   t1
+ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+ Leer R3                         x       t7
+ Leer R4                         t3  t5
+ Leer R5                             t4
+ UF-NI                           −   +   máx
+ Esc R3                              t7
+ Esc R4                          t3  t5  t6
+ Esc R5                          t4
+ Salida                                      X
+</code></pre>
+<p>Lo esencial que se ve:</p>
+<ul>
+<li>Mientras el nivel superior hace sus abs/máx/mín (ciclos s1–s4), el nivel inferior está <strong>vacío</strong> (todavía no tiene datos).</li>
+<li>Cuando el superior termina y cruza la frontera, el inferior arranca (ciclos s4–s7).</li>
+<li>Un juego de datos completo tarda del orden de <strong>8 ciclos</strong> de principio a fin.</li>
+</ul>
+<h3>7.2 Por qué 3 ciclos por operación</h3>
+<pre><code>   ciclo k:     Leer R  →  el dato sale del registro al bus
+   ciclo k+1:   UF      →  la unidad calcula
+   ciclo k+2:   Esc R   →  el resultado se guarda en el registro destino
+</code></pre>
+<p>Por eso la tabla &quot;escalona&quot; cada operación en diagonal.</p>
+<hr>
+<h2>8. Paso 5 — Solapar conjuntos de datos (el pipeline en acción)</h2>
+<p>Aquí ocurre la magia. En cuanto el nivel superior <strong>termina el juego 1 y lo pasa al inferior</strong>, puede empezar el <strong>juego 2</strong>. En tus capturas esto son los colores: <strong>celeste = 1er conjunto, rosa = 2do conjunto</strong>.</p>
+<pre><code> Elemento \ ciclo   s0  s1  s2  s3  s4  s5  s6  s7  s8  s9  s10 s11 s12
+ ──────────────────────────────────────────────────────────────────
+ Leer R1                 b   t2          b   t2             (celeste=1, rosa=2)
+ Leer R2             a   t1          a   t1
+ UF-NS              aA  aB  máx mín aA  aB  máx
+                    (1) (1) (1) (1)(2) (2) (2)
+ &gt;&gt;1                             X               X
+ &gt;&gt;3                         X                   X
+ Esc R1              b       t2          b       t2
+ Esc R2             a   t1          a   t1
+ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+ Leer R3                         x       t7  x           x     (1 y 2 solapados)
+ Leer R4                         t3  t5      t3  t5  t6
+ Leer R5                             t4          t4
+ UF-NI                           −   +   máx −   +   máx
+ Esc R3                              t7              t7
+ Esc R4                          t3  t5  t6  t3  t5  t6
+ Esc R5                          t4          t4
+ Salida                                      X           X
+</code></pre>
+<p>Clave: en el ciclo s4–s5, el nivel <strong>superior ya está procesando el 2do conjunto (rosa)</strong> mientras el <strong>inferior todavía procesa el 1ro (celeste)</strong>. Los dos niveles trabajan a la vez sobre datos distintos. Eso es lo que ahorra tiempo.</p>
+<hr>
+<h2>9. Paso 6 — Calcular la ganancia (% de mejora)</h2>
+<p>Ésta es la tabla final de tus capturas:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>1er conjunto</th>
+<th>2do conjunto</th>
+<th>3er conjunto</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Sin segmentación</strong></td>
+<td>9</td>
+<td>18</td>
+<td>27</td>
+</tr>
+<tr>
+<td><strong>Con segmentación</strong></td>
+<td>8</td>
+<td>12</td>
+<td>16</td>
+</tr>
+<tr>
+<td><strong>Diferencia (ciclos ahorrados)</strong></td>
+<td>1</td>
+<td>6</td>
+<td>11</td>
+</tr>
+<tr>
+<td><strong>% Mejora</strong></td>
+<td>0,11</td>
+<td>0,33</td>
+<td>0,41</td>
+</tr>
+</tbody></table>
+<h3>Cómo se obtiene cada número</h3>
+<p><strong>Sin segmentación</strong> (los juegos se hacen uno tras otro, un juego = 9 ciclos):</p>
+<ul>
+<li>1 juego: 9 · 1 = 9</li>
+<li>2 juegos: 9 · 2 = 18</li>
+<li>3 juegos: 9 · 3 = 27</li>
+</ul>
+<p><strong>Con segmentación</strong> (el primer juego cuesta 8; cada juego siguiente solo añade lo que tarda un nivel, porque se solapa con el anterior; aquí ≈ 4 ciclos extra por juego):</p>
+<ul>
+<li>1 juego: 8</li>
+<li>2 juegos: 8 + 4 = 12</li>
+<li>3 juegos: 12 + 4 = 16</li>
+</ul>
+<p><strong>% Mejora = (sin − con) / sin:</strong></p>
+<ul>
+<li>1 juego: (9 − 8)/9 = 0,11 (11 %)</li>
+<li>2 juegos: (18 − 12)/18 = 0,33 (33 %)</li>
+<li>3 juegos: (27 − 16)/27 = 0,41 (41 %)</li>
+</ul>
+<pre><code>  Ciclos
+   27 ┤                              ● sin segmentar
+      │                         ╱
+   18 ┤                    ╱●
+      │               ╱   ╱         ● con segmentar (16)
+   16 ┤          ╱   ╱ ╱─────────●
+   12 ┤      ●─╱─╱─●
+    9 ┤   ●╱
+    8 ┤ ●
+      └──┬──────┬──────┬───────► nº de conjuntos
+         1      2      3
+</code></pre>
+<p><strong>La conclusión más importante del tema:</strong> la ganancia <strong>crece con el número de datos</strong>. Para 1 solo dato casi no mejora (11 %), porque hay que &quot;llenar&quot; el pipeline; pero para muchos datos la mejora se acerca al ideal. Por eso segmentar sirve cuando hay que procesar <strong>un flujo</strong> de datos, no un cálculo aislado.</p>
+<p>Fórmula general: con <strong>k niveles</strong> y <strong>N juegos de datos</strong>, y si cada nivel tarda c ciclos,</p>
+<pre><code>   Sin segmentar:  N · (k · c)
+   Con segmentar:  k · c  +  (N − 1) · c      ← primer juego lleno + los demás uno por nivel
+   Ganancia → k    cuando N es muy grande
+</code></pre>
+<hr>
+<h2>10. La otra segmentación: partir una unidad funcional</h2>
+<p>Tu apunte tiene también la pregunta: <strong>&quot;¿cuál es la ganancia al segmentar la unidad funcional en una parte (dos etapas)?&quot;</strong> Esto es distinto de lo anterior: aquí se parte <strong>una sola unidad</strong>, no todo el algoritmo.</p>
+<pre><code>        A   B
+        │   │
+     ┌──▼───▼──┐
+     │  + / −  │   ← Etapa 1 (la parte lenta: sumador/restador)
+     └────┬────┘
+        ║reg║      ← registro interno de segmentación
+     ┌────▼────┐
+     │ MUX máx │   ← Etapa 2 (selección máx/mín/abs)
+     │ MUX mín │
+     └────┬────┘
+          ▼
+         SAL
+</code></pre>
+<ul>
+<li>La unidad hacía antes todo de una vez (retardo grande); ahora lo hace en 2 etapas, así que el <strong>reloj puede ir más rápido</strong>.</li>
+<li>Pero una operación tarda <strong>2 ciclos</strong> en salir (latencia). Puede <strong>lanzar una nueva cada ciclo</strong>.</li>
+<li><strong>Gana solo si hay operaciones independientes</strong> para solapar. En este ejercicio t3 y t4 (los dos desplazamientos) son independientes y se pueden solapar; por eso tu apunte marca con flechas rojas esa zona del ASM.</li>
+</ul>
+<p>Diagrama de bloques resultante (tu hoja): la UF segmentada alimenta a los dos desplazadores &gt;&gt;1 y &gt;&gt;3.</p>
+<pre><code>          A        B
+          │        │
+      ┌───▼────────▼───┐
+      │ UF SEGMENTADA  │  (2 etapas internas)
+      └───┬────────┬───┘
+       ┌──▼─┐   ┌──▼──┐
+       │&gt;&gt;1 │   │ &gt;&gt;3 │
+       └────┘   └─────┘
+</code></pre>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Segmentar la UF</th>
+<th>Segmentar el CD (secciones 3–9)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Qué se parte</td>
+<td>una unidad en 2 etapas</td>
+<td>todo el algoritmo en 2 niveles</td>
+</tr>
+<tr>
+<td>Registros nuevos</td>
+<td>1 interno</td>
+<td>un banco por nivel + frontera</td>
+</tr>
+<tr>
+<td>Para qué</td>
+<td>subir el reloj de esa unidad</td>
+<td>procesar flujos de datos</td>
+</tr>
+<tr>
+<td>Ganancia</td>
+<td>pequeña si todo es dependiente</td>
+<td>crece con el nº de datos</td>
+</tr>
+</tbody></table>
+<hr>
+<h2>11. Receta para cualquier ejercicio</h2>
+<p>Para segmentar <strong>el camino de datos</strong> de cualquier ASM:</p>
+<ol>
+<li><strong>Dibuja el ASM</strong> con un estado por paso.</li>
+<li><strong>Traza la línea de corte</strong> por un punto donde crucen pocas variables y los dos lados queden parecidos. Quedan Nivel Superior y Nivel Inferior.</li>
+<li><strong>Agrupa variables en cada nivel por separado</strong> (lado izquierdo). Anota qué variables cruzan la frontera → registro de frontera.</li>
+<li><strong>Dibuja el mini camino de datos</strong> de cada nivel, unidos por el registro de frontera.</li>
+<li><strong>Arma la tabla de tiempos</strong> con filas Leer Rx / UF / Esc Rx (3 ciclos por operación) y una línea punteada en la frontera. Rellena un juego de datos.</li>
+<li><strong>Solapa conjuntos</strong>: empieza el 2º juego en el nivel superior en cuanto el 1º cruzó la frontera. Colorea cada conjunto.</li>
+<li><strong>Tabla de ganancia</strong>: cuenta ciclos sin segmentar (N · ciclos_por_juego) y con segmentar (primer juego lleno + c por cada juego extra). Calcula % mejora = (sin − con)/sin.</li>
+</ol>
+<p>Para segmentar <strong>una unidad funcional</strong>:</p>
+<ol>
+<li>Elige la unidad lenta. Pártela en 2 etapas con un registro interno.</li>
+<li>Nuevo reloj = etapa más lenta (de esa unidad) o el de las demás unidades, el que mande.</li>
+<li>Regla: lanzada en Sk → resultado en Sk+2.</li>
+<li>Replanifica el ASM lanzando operaciones <strong>independientes</strong> en los huecos.</li>
+<li>La ganancia es alta solo si hay independencia; si todo está encadenado, es poca.</li>
+</ol>
+<hr>
+<h2>12. Resumen</h2>
+<ul>
+<li>Segmentar el CD = <strong>cortar el ASM en niveles</strong> con un registro de frontera, agrupar variables <strong>en cada nivel</strong>, y solapar juegos de datos.</li>
+<li>La herramienta de análisis es la <strong>tabla de tiempos ciclo a ciclo</strong> (Leer / UF / Escribir), con colores para cada conjunto.</li>
+<li>Cada operación cuesta <strong>3 ciclos</strong> (leer, ejecutar, escribir).</li>
+<li>La <strong>ganancia crece con el número de datos</strong>: 11 % para 1 juego, 33 % para 2, 41 % para 3… tendiendo al número de niveles.</li>
+<li>Segmentar <strong>una UF</strong> es otra técnica: parte una sola unidad en 2 etapas; solo gana si hay operaciones independientes.</li>
+</ul>
+<blockquote>
+<p>Resultados numéricos (9/18/27 vs 8/12/16 y 0,11/0,33/0,41) tomados directamente de tus capturas de Numbers. Si quieres, aplico este mismo método completo al ejercicio del <strong>parcial 2</strong> (Out = (y²+eˣ)/4): solo dime por dónde quieres la línea de corte y armo las dos tablas de niveles y la tabla de tiempos con sus colores.</p>
+</blockquote>
+</body></html>
